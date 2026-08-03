@@ -77,6 +77,25 @@ Verify Traffic Flowing
     Should Be True    ${parts}[0] == ${expected_total}    Expected ${expected_total} flows (${expected_flows} sessions x 2 directions) but got ${parts}[0]
     Should Be True    ${parts}[1] == ${expected_total}    Only ${parts}[1]/${expected_total} traffic flows verified — traffic not flowing bidirectionally through BNG
 
+Verify No Session Flaps
+    [Arguments]    ${container}
+    [Documentation]    Verify no BNG Blaster session renegotiated (hitless failover check).
+    ${rc}    ${output} =    BNG Blaster CLI Command    ${container}    session-counters
+    Should Be Equal As Integers    ${rc}    0    session-counters CLI failed
+    ${rc}    ${flapped} =    Run And Return Rc And Output
+    ...    echo '${output}' | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('session-counters',{}).get('sessions-flapped',0))"
+    Should Be Equal As Integers    ${rc}    0
+    Should Be Equal As Integers    ${flapped}    0    ${flapped} sessions renegotiated, failover was not hitless
+
+Reset Stream Verification
+    [Arguments]    ${container}
+    [Documentation]    Reset stream flow verification state so a later Verify Stream Traffic
+    ...    Flowing call proves traffic is flowing now, not that it flowed at some point before.
+    ...    Without this, flows verified before a failover stay verified forever and the
+    ...    post-failover traffic check passes even when traffic is blackholed.
+    ${rc}    ${output} =    BNG Blaster CLI Command    ${container}    stream-reset
+    Should Be Equal As Integers    ${rc}    0    stream-reset CLI failed
+
 Verify Stream Traffic Flowing
     [Arguments]    ${container}    ${expected_flows}=5
     [Documentation]    Verify BNG Blaster stream-traffic flows are verified (NAT-aware streams).

@@ -1364,10 +1364,10 @@ func (c *Component) handleHAStateChange(event events.Event) {
 
 	wasActive := data.OldState == string(ha.SRGStateActive) || data.OldState == string(ha.SRGStateActiveSolo)
 	isActive := data.NewState == string(ha.SRGStateActive) || data.NewState == string(ha.SRGStateActiveSolo)
-	wasStandbyAlone := data.OldState == string(ha.SRGStateStandbyAlone)
+	wasStandby := data.OldState == string(ha.SRGStateStandby) || data.OldState == string(ha.SRGStateStandbyAlone)
 
-	if isActive && !wasActive && wasStandbyAlone {
-		c.logger.Info("SRG promoted from standby alone, restoring synced PPPoE sessions", "srg", data.SRGName)
+	if isActive && !wasActive && wasStandby {
+		c.logger.Info("SRG promoted from standby, restoring synced PPPoE sessions", "srg", data.SRGName)
 		go c.restoreFromHASync(data.SRGName)
 	}
 }
@@ -1389,7 +1389,7 @@ func (c *Component) restoreFromHASync(srgName string) {
 		return
 	}
 
-	encapIfIndex, ok := c.ifMgr.GetSwIfIndex(srgCfg.Interfaces[0])
+	srgIfIndex, ok := c.ifMgr.GetSwIfIndex(srgCfg.Interfaces[0])
 	if !ok {
 		c.logger.Error("Failed to resolve SRG access interface",
 			"srg", srgName,
@@ -1436,6 +1436,7 @@ func (c *Component) restoreFromHASync(srgName string) {
 		outerVLAN := uint16(cp.OuterVlan)
 		innerVLAN := uint16(cp.InnerVlan)
 		pppoeSessionID := uint16(cp.PppoeSessionId)
+		encapIfIndex := c.resolveSyncEncapIfIndex(cp.SessionId, outerVLAN, innerVLAN, srgIfIndex)
 
 		var ipv4 net.IP
 		if len(cp.Ipv4Address) > 0 {
@@ -1605,6 +1606,33 @@ func (c *Component) restoreFromHASync(srgName string) {
 		"srg", srgName,
 		"restored", restored,
 		"failed", failed)
+}
+
+// resolveSyncEncapIfIndex resolves the encap sw_if_index for a synced
+// checkpoint on the local node. sw_if_index is never serialized in HA sync
+// (it is locally scoped), and the SRG interface is the S-VLAN parent while
+// the dataplane keys sessions on the sub-interface the packets ingress on,
+// so the (parent-interface, svlan) pair from subscriber-group config maps
+// to the conventional "parent.svlan" sub-interface name. Falls back to the
+// SRG interface for untagged setups or when no subscriber group matches.
+func (c *Component) resolveSyncEncapIfIndex(sessionID string, outerVLAN, innerVLAN uint16, srgIfIndex uint32) uint32 {
+	if c.vpp == nil || c.cfgMgr == nil || outerVLAN == 0 {
+		return srgIfIndex
+	}
+	match, ok := c.cfgMgr.LookupSubscriberGroup(outerVLAN, innerVLAN)
+	if !ok || match.VR == nil || match.VR.ParentInterface == "" {
+		return srgIfIndex
+	}
+	name := fmt.Sprintf("%s.%d", match.VR.ParentInterface, outerVLAN)
+	idx, err := c.vpp.GetInterfaceIndex(name)
+	if err != nil || idx == 0 {
+		c.logger.Warn("Failed to resolve encap sub-interface for HA restore, using SRG interface",
+			"session_id", sessionID,
+			"name", name,
+			"error", err)
+		return srgIfIndex
+	}
+	return uint32(idx)
 }
 
 func (c *Component) ForEachSession(fn func(models.SubscriberSession) bool) {
