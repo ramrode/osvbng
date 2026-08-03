@@ -128,6 +128,9 @@ Verify CGNAT Mappings Restored On bng2
     Wait Until Keyword Succeeds    30 x    2s
     ...    Check CGNAT Mapping Count    ${bng2}    ${session-count}
 
+Reset Stream Flow Verification
+    Reset Stream Verification    ${subscribers}
+
 Verify Traffic Recovers After Failover
     Wait Until Keyword Succeeds    30 x    5s
     ...    Verify Stream Traffic Flowing    ${subscribers}    expected_flows=${session-count}

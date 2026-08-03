@@ -134,6 +134,9 @@ Verify Restored Sessions Still Use RADIUS Pool
     Should Contain    ${output}    100.64.
     Should Not Contain    ${output}    10.255.
 
+Reset Stream Flow Verification
+    Reset Stream Verification    ${subscribers}
+
 Verify Traffic Recovers After Failover
     Wait Until Keyword Succeeds    30 x    5s
     ...    Verify Stream Traffic Flowing    ${subscribers}    expected_flows=${session-count}

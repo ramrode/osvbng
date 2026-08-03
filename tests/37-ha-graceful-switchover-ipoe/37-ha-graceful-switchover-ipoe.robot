@@ -3,10 +3,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 *** Comments ***
-HA tracker-driven promotion test for IPoE with CGNAT.
-Validates that when the standby BNG is in STANDBY_ALONE and its tracked
-access interface goes down, it automatically promotes to ACTIVE_SOLO
-and restores synced sessions without manual intervention.
+HA graceful switchover test for IPoE with CGNAT.
+Establishes sessions on ACTIVE, verifies sync, then triggers a graceful
+switchover via the API (no force, no failure) and validates that synced
+sessions forward traffic on the new active without subscriber renegotiation.
+Traffic streams are NOT stopped before the switchover, and stream flow
+verification is reset afterwards so the traffic check proves fresh
+forwarding through the new active.
 
 *** Settings ***
 Library             OperatingSystem
@@ -16,12 +19,12 @@ Resource            ../common.robot
 Resource            ../bngblaster.robot
 Resource            ../sessions.robot
 
-Suite Setup         Deploy Failover Topology
-Suite Teardown      Destroy Failover Topology
+Suite Setup         Deploy Graceful Topology
+Suite Teardown      Destroy Graceful Topology
 
 *** Variables ***
-${lab-name}         osvbng-ha-tracker-promotion-ipoe
-${lab-file}         ${CURDIR}/17-ha-tracker-promotion-ipoe.clab.yml
+${lab-name}         osvbng-ha-graceful-ipoe
+${lab-file}         ${CURDIR}/37-ha-graceful-switchover-ipoe.clab.yml
 ${bng1}             clab-${lab-name}-bng1
 ${bng2}             clab-${lab-name}-bng2
 ${corerouter1}      clab-${lab-name}-corerouter1
@@ -37,15 +40,6 @@ Verify bng1 Is Healthy
 Verify bng2 Is Healthy
     Wait For osvbng Healthy    bng2    ${lab-name}
 
-Verify VPP Is Running On bng1
-    [Documentation]    Check VPP is running and responsive on bng1.
-    ${output} =    Execute VPP Command    ${bng1}    show version
-    Should Contain    ${output}    vpp
-
-Verify VPP Is Running On bng2
-    [Documentation]    Check VPP is running and responsive on bng2.
-    ${output} =    Execute VPP Command    ${bng2}    show version
-    Should Contain    ${output}    vpp
 Verify bng1 Is ACTIVE
     Wait Until Keyword Succeeds    20 x    5s
     ...    Check HA Status    ${bng1}    ACTIVE
@@ -53,14 +47,6 @@ Verify bng1 Is ACTIVE
 Verify bng2 Is STANDBY
     Wait Until Keyword Succeeds    20 x    5s
     ...    Check HA Status    ${bng2}    STANDBY
-
-Verify CGNAT Plugin Loaded On bng1
-    ${output} =    Execute VPP Command    ${bng1}    show plugins
-    Should Contain    ${output}    osvbng_cgnat
-
-Verify CGNAT Plugin Loaded On bng2
-    ${output} =    Execute VPP Command    ${bng2}    show plugins
-    Should Contain    ${output}    osvbng_cgnat
 
 Verify OSPF Adjacency For bng1
     Wait Until Keyword Succeeds    12 x    10s
@@ -84,49 +70,30 @@ Establish Subscriber Sessions On bng1
     Start BNG Blaster In Background    ${subscribers}    config=/config/subscribers.json
     Wait For Sessions Established    ${bng1}    ${subscribers}    ${session-count}
 
-Verify Sessions Have IPv4 In Shared Address Space
-    ${output} =    Get osvbng API Response    ${bng1}    /api/show/subscriber/sessions
-    Should Contain    ${output}    100.64.
-
 Verify CGNAT Mappings Exist On bng1
     Wait Until Keyword Succeeds    12 x    5s
     ...    Check CGNAT Mapping Count    ${bng1}    ${session-count}
-
-Verify CGNAT Outside Routes On Core Router
-    Wait Until Keyword Succeeds    12 x    10s
-    ...    Check BGP Route On Router    ${corerouter1}    203.0.113.
 
 Verify NAT Traffic Flowing On bng1
     Wait Until Keyword Succeeds    12 x    10s
     ...    Verify Stream Traffic Flowing    ${subscribers}    expected_flows=${session-count}
 
-Verify Session Sync Updates On ACTIVE
-    Wait Until Keyword Succeeds    30 x    2s
-    ...    Check Sync Updates    ${bng1}    ${session-count}
-
 Verify Session Sync Received On STANDBY
     Wait Until Keyword Succeeds    30 x    2s
     ...    Check Sync Sequence Nonzero    ${bng2}
 
-# --- Phase 3: Tracker-Driven Failover ---
+# --- Phase 3: Graceful Switchover ---
 
-Kill Active BNG
-    ${rc} =    Run And Return Rc    docker kill ${bng1}
-    Should Be Equal As Integers    ${rc}    0
+Trigger Graceful Switchover
+    Exec osvbng API    ${bng1}    /api/exec/ha/switchover
 
-Verify bng2 Detects Peer Loss
+Verify bng1 Is Now STANDBY
     Wait Until Keyword Succeeds    20 x    5s
-    ...    Check HA Status    ${bng2}    STANDBY_ALONE
+    ...    Check HA Status    ${bng1}    STANDBY
 
-Bring Down Tracked Interface On bng2
-    Execute VPP Command    ${bng2}    set interface state eth1 down
-
-Verify bng2 Automatically Promotes To Active Solo
-    Wait Until Keyword Succeeds    10 x    2s
-    ...    Check HA Status    ${bng2}    ACTIVE_SOLO
-
-Bring Tracked Interface Back Up On bng2
-    Execute VPP Command    ${bng2}    set interface state eth1 up
+Verify bng2 Is Now ACTIVE
+    Wait Until Keyword Succeeds    20 x    5s
+    ...    Check HA Status    ${bng2}    ACTIVE
 
 Verify Sessions Restored On bng2
     Wait Until Keyword Succeeds    30 x    2s
@@ -139,26 +106,29 @@ Verify CGNAT Mappings Restored On bng2
 Reset Stream Flow Verification
     Reset Stream Verification    ${subscribers}
 
-Verify Traffic Recovers After Failover
+Verify Traffic Recovers After Switchover
     Wait Until Keyword Succeeds    30 x    5s
     ...    Verify Stream Traffic Flowing    ${subscribers}    expected_flows=${session-count}
 
+Verify Switchover Was Hitless
+    Verify No Session Flaps    ${subscribers}
+
 *** Keywords ***
-Deploy Failover Topology
+Deploy Graceful Topology
     Create Access Bridge
     Deploy Topology    ${lab-file}
 
-Destroy Failover Topology
+Destroy Graceful Topology
     Run Keyword And Ignore Error    Stop BNG Blaster    ${subscribers}
     Destroy Topology    ${lab-file}
     Destroy Access Bridge
 
 Create Access Bridge
-    ${rc} =    Run And Return Rc    sudo ip link add access-sw type bridge
-    ${rc} =    Run And Return Rc    sudo ip link set access-sw up
+    ${rc} =    Run And Return Rc    sudo ip link add access-sw-gr type bridge
+    ${rc} =    Run And Return Rc    sudo ip link set access-sw-gr up
 
 Destroy Access Bridge
-    Run And Return Rc    sudo ip link del access-sw
+    Run And Return Rc    sudo ip link del access-sw-gr
 
 Check HA Status
     [Arguments]    ${container}    ${expected_state}
@@ -170,14 +140,6 @@ Check OSPF Neighbor On Router
     ${output} =    Execute Vtysh On Router    ${container}    show ip ospf neighbor
     Should Contain    ${output}    ${neighbor_rid}
     Should Contain    ${output}    Full
-
-Check Sync Updates
-    [Arguments]    ${container}    ${expected}
-    ${output} =    Get osvbng API Response    ${container}    /api/show/ha/sync
-    ${rc}    ${updates} =    Run And Return Rc And Output
-    ...    echo '${output}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(e.get('updates',0) for e in d.get('data',[])))"
-    Should Be Equal As Integers    ${rc}    0
-    Should Be True    ${updates} >= ${expected}    Sync updates ${updates} < expected ${expected}
 
 Check Sync Sequence Nonzero
     [Arguments]    ${container}
@@ -202,3 +164,12 @@ Check Session Count On BNG
     ...    echo '${output}' | python3 -c "import sys,json; d=json.load(sys.stdin); entries=d.get('data',[]); print(len(entries))"
     Should Be Equal As Integers    ${rc}    0
     Should Be True    ${count} >= ${expected}    Session count ${count} < expected ${expected}
+
+Exec osvbng API
+    [Arguments]    ${container}    ${path}
+    ${ip} =    Get Container IPv4    ${container}
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    wget -qO- http://${ip}:${OSVBNG_API_PORT}${path} --post-data='' 2>/dev/null
+    Log    ${output}
+    Should Be Equal As Integers    ${rc}    0
+    RETURN    ${output}
