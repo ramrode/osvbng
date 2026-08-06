@@ -16,15 +16,22 @@ import (
 // no per-subscriber control-plane work.
 func (c *Component) applyStaticMaps() error {
 	cfg, err := c.cfgMgr.GetRunning()
-	if err != nil || cfg == nil || cfg.L2GW == nil {
+	if err != nil || cfg == nil {
+		return nil
+	}
+	return c.applyStaticMapsFrom(cfg.L2GW)
+}
+
+func (c *Component) applyStaticMapsFrom(l2gwCfg *l2gwcfg.L2GWConfig) error {
+	if l2gwCfg == nil {
 		return nil
 	}
 
-	for i, sm := range cfg.L2GW.StaticMaps {
+	for i, sm := range l2gwCfg.StaticMaps {
 		if sm == nil {
 			continue
 		}
-		if err := c.applyStaticMap(cfg.L2GW, sm); err != nil {
+		if err := c.applyStaticMap(l2gwCfg, sm); err != nil {
 			c.logger.Error("Failed to apply l2gw static map",
 				"index", i, "access_interface", sm.AccessInterface,
 				"svlan", sm.SVLAN, "handoff_group", sm.HandoffGroup,

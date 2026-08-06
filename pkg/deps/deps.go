@@ -77,5 +77,6 @@ type ConfDeps struct {
 	VRFManager       *vrfmgr.Manager
 	SvcGroupResolver *svcgroup.Resolver
 	CPPM             *cppm.Manager
+	L2GW             *l2gwcomp.Component
 	PluginComponents map[string]component.Component
 }
