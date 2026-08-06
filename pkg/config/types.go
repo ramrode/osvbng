@@ -38,7 +38,7 @@ type Config struct {
 	L2TP             *l2tp.L2TPConfig                   `json:"l2tp,omitempty" yaml:"l2tp,omitempty"`
 	L2GW             *l2gwcfg.L2GWConfig                `json:"l2gw,omitempty" yaml:"l2gw,omitempty"`
 
-	// Walked in struct order — dependency order matters
+	// Walked in struct order, dependency order matters
 	System          *SystemConfig                          `json:"system,omitempty" yaml:"system,omitempty"`
 	RoutingPolicies *routing_policy.RoutingPolicyConfig     `json:"routing-policies,omitempty" yaml:"routing-policies,omitempty"`
 	VRFS            map[string]*ip.VRFSConfig               `json:"vrfs,omitempty" yaml:"vrfs,omitempty"`
@@ -68,9 +68,10 @@ type ConfigLine struct {
 }
 
 // NeedsAccessInterface reports whether this config has any subscriber
-// group that requires a directly-attached access interface (PPPoE,
-// IPoE, LAC). LNS-only deployments have subscribers arriving via L2TP
-// and never bind an access interface.
+// group that requires the single autoconfig access interface (PPPoE,
+// IPoE, LAC). LNS-only deployments have subscribers arriving via L2TP,
+// and l2gw ranges arm their own per-NNI ports (one per wholesale access
+// operator) without any autoconfig derivation.
 func (c *Config) NeedsAccessInterface() bool {
 	if c.SubscriberGroups == nil {
 		return false

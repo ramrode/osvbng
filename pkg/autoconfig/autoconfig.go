@@ -72,6 +72,13 @@ func (a *Autoconfig) deriveGroupConfig(group *subscriber.SubscriberGroup) ([]Cha
 }
 
 func (a *Autoconfig) deriveSVLANConfig(group *subscriber.SubscriberGroup, vlanRange subscriber.VLANRange, svlan uint16) []Change {
+	// l2gw ranges derive nothing: the wholesale trigger path is armed in
+	// the l2gw dataplane plugin (L2 DHCP snoop on circuit miss), not via
+	// sub-interfaces or punt registrations.
+	if vlanRange.HasAccessType(subscriber.AccessTypeL2GW) {
+		return nil
+	}
+
 	var changes []Change
 
 	loopback := vlanRange.Interface

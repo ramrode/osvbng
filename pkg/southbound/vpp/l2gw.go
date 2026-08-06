@@ -40,6 +40,36 @@ func (v *VPP) L2GWEnableInput(ifaceName string, enable bool) error {
 	return nil
 }
 
+func (v *VPP) L2GWTriggerSVLANRange(ifaceName string, svlanLo, svlanHi uint16, add bool) error {
+	ch, err := v.conn.NewAPIChannel()
+	if err != nil {
+		return fmt.Errorf("create API channel: %w", err)
+	}
+	defer ch.Close()
+
+	idx, err := v.GetInterfaceIndex(ifaceName)
+	if err != nil {
+		return fmt.Errorf("get interface index: %w", err)
+	}
+
+	req := &osvbng_l2gw.OsvbngL2gwTriggerSvlanRange{
+		SwIfIndex: interface_types.InterfaceIndex(idx),
+		SvlanLo:   svlanLo,
+		SvlanHi:   svlanHi,
+		IsAdd:     add,
+	}
+
+	reply := &osvbng_l2gw.OsvbngL2gwTriggerSvlanRangeReply{}
+	if err := ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("l2gw trigger svlan range: %w", err)
+	}
+	if reply.Retval != 0 {
+		return fmt.Errorf("l2gw trigger svlan range failed: retval=%d", reply.Retval)
+	}
+
+	return nil
+}
+
 func buildL2GWCircuitReq(circuit southbound.L2GWCircuit, isAdd bool) *osvbng_l2gw.OsvbngL2gwAddDelCircuit {
 	req := &osvbng_l2gw.OsvbngL2gwAddDelCircuit{
 		IsAdd:            isAdd,

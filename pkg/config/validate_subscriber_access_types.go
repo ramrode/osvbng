@@ -58,7 +58,13 @@ func ValidateSubscriberAccessTypes(cfg *Config) error {
 				if _, ok := cfg.Interfaces[vr.ParentInterface]; !ok {
 					return fmt.Errorf("subscriber group %q vlans[%d]: parent-interface %q is not defined in interfaces", name, i, vr.ParentInterface)
 				}
-				parentInterfaces[vr.ParentInterface] = struct{}{}
+				// l2gw ranges are exempt from the single-access-interface
+				// constraint: each wholesale access operator lands on its
+				// own NNI port, and nothing l2gw derives depends on a
+				// single parent (no autoconfig sub-interfaces).
+				if !vr.HasAccessType(subscriber.AccessTypeL2GW) {
+					parentInterfaces[vr.ParentInterface] = struct{}{}
+				}
 			} else if vr.ParentInterface != "" {
 				if _, ok := cfg.Interfaces[vr.ParentInterface]; !ok {
 					return fmt.Errorf("subscriber group %q vlans[%d]: parent-interface %q is not defined in interfaces", name, i, vr.ParentInterface)
