@@ -28,10 +28,21 @@ type L2GWCircuit struct {
 
 type L2GW interface {
 	L2GWEnableInput(ifaceName string, enable bool) error
-	AddL2GWCircuit(circuit L2GWCircuit) (uint32, error)
+	// AddL2GWCircuit returns (circuit id == access-direction counter
+	// index, handoff-direction counter index) in the /osvbng/l2gw stats
+	// segment.
+	AddL2GWCircuit(circuit L2GWCircuit) (uint32, uint32, error)
 	DelL2GWCircuit(circuit L2GWCircuit) error
 	SetL2GWCircuitState(circuitID uint32, enabled bool) error
 	DumpL2GWCircuits() ([]L2GWCircuitDetails, error)
+	GetL2GWStats() (map[uint32]L2GWEntryStats, error)
+}
+
+// L2GWEntryStats is one direction's cumulative counters from the
+// /osvbng/l2gw stats segment, summed across workers.
+type L2GWEntryStats struct {
+	Packets uint64
+	Bytes   uint64
 }
 
 // L2GWCircuitDetails is one circuit from the dataplane dump. The entry

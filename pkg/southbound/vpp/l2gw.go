@@ -65,17 +65,17 @@ func buildL2GWCircuitReq(circuit southbound.L2GWCircuit, isAdd bool) *osvbng_l2g
 	return req
 }
 
-func (v *VPP) AddL2GWCircuit(circuit southbound.L2GWCircuit) (uint32, error) {
+func (v *VPP) AddL2GWCircuit(circuit southbound.L2GWCircuit) (uint32, uint32, error) {
 	ch, err := v.conn.NewAPIChannel()
 	if err != nil {
-		return 0, fmt.Errorf("create API channel: %w", err)
+		return 0, 0, fmt.Errorf("create API channel: %w", err)
 	}
 	defer ch.Close()
 
 	req := buildL2GWCircuitReq(circuit, true)
 	reply := &osvbng_l2gw.OsvbngL2gwAddDelCircuitReply{}
 	if err := ch.SendRequest(req).ReceiveReply(reply); err != nil {
-		return 0, fmt.Errorf("add l2gw circuit: %w", err)
+		return 0, 0, fmt.Errorf("add l2gw circuit: %w", err)
 	}
 
 	if reply.Retval == retvalEntryNeedsRefresh {
@@ -88,23 +88,23 @@ func (v *VPP) AddL2GWCircuit(circuit southbound.L2GWCircuit) (uint32, error) {
 		delReq := buildL2GWCircuitReq(circuit, false)
 		delReply := &osvbng_l2gw.OsvbngL2gwAddDelCircuitReply{}
 		if err := ch.SendRequest(delReq).ReceiveReply(delReply); err != nil {
-			return 0, fmt.Errorf("refresh l2gw circuit: del: %w", err)
+			return 0, 0, fmt.Errorf("refresh l2gw circuit: del: %w", err)
 		}
 		if delReply.Retval != 0 {
-			return 0, fmt.Errorf("refresh l2gw circuit: del retval=%d", delReply.Retval)
+			return 0, 0, fmt.Errorf("refresh l2gw circuit: del retval=%d", delReply.Retval)
 		}
 
 		reply = &osvbng_l2gw.OsvbngL2gwAddDelCircuitReply{}
 		if err := ch.SendRequest(buildL2GWCircuitReq(circuit, true)).ReceiveReply(reply); err != nil {
-			return 0, fmt.Errorf("refresh l2gw circuit: re-add: %w", err)
+			return 0, 0, fmt.Errorf("refresh l2gw circuit: re-add: %w", err)
 		}
 	}
 
 	if reply.Retval != 0 {
-		return 0, fmt.Errorf("add l2gw circuit failed: retval=%d", reply.Retval)
+		return 0, 0, fmt.Errorf("add l2gw circuit failed: retval=%d", reply.Retval)
 	}
 
-	return reply.CircuitID, nil
+	return reply.CircuitID, reply.HandoffEntryIndex, nil
 }
 
 func (v *VPP) DelL2GWCircuit(circuit southbound.L2GWCircuit) error {

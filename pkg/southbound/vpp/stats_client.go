@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/veesix-networks/osvbng/pkg/southbound"
+	"go.fd.io/govpp/adapter"
 	"go.fd.io/govpp/adapter/statsclient"
 	"go.fd.io/govpp/api"
 	"go.fd.io/govpp/core"
@@ -279,6 +280,41 @@ func (s *StatsClient) GetAllStats() (*southbound.DataplaneStats, error) {
 
 	if bufs, err := s.GetBufferStats(); err == nil {
 		result.Buffers = bufs
+	}
+
+	return result, nil
+}
+
+// GetL2GWStats reads the l2gw plugin's per-circuit-direction combined
+// counters from the stats segment, summed across workers, keyed by
+// entry index.
+func (s *StatsClient) GetL2GWStats() (map[uint32]southbound.L2GWEntryStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if !s.connected {
+		return nil, fmt.Errorf("not connected to stats")
+	}
+
+	entries, err := s.client.DumpStats("/osvbng/l2gw")
+	if err != nil {
+		return nil, fmt.Errorf("dump l2gw stats: %w", err)
+	}
+
+	result := make(map[uint32]southbound.L2GWEntryStats)
+	for _, entry := range entries {
+		combined, ok := entry.Data.(adapter.CombinedCounterStat)
+		if !ok {
+			continue
+		}
+		for _, worker := range combined {
+			for idx, ctr := range worker {
+				st := result[uint32(idx)]
+				st.Packets += ctr.Packets()
+				st.Bytes += ctr.Bytes()
+				result[uint32(idx)] = st
+			}
+		}
 	}
 
 	return result, nil

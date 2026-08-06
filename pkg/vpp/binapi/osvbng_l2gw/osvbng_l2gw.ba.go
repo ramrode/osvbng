@@ -25,7 +25,7 @@ const _ = api.GoVppAPIPackageIsVersion2
 const (
 	APIFile    = "osvbng_l2gw"
 	APIVersion = "1.0.0"
-	VersionCrc = 0x197fdf29
+	VersionCrc = 0xa2be8490
 )
 
 // Add or delete a bidirectional L2GW circuit
@@ -129,19 +129,21 @@ func (m *OsvbngL2gwAddDelCircuit) Unmarshal(b []byte) error {
 // Reply for add/delete circuit
 //   - retval - return code
 //   - circuit_id - stable circuit identifier (also the access-side
-//     counter index; peer counter index is circuit_id's twin from dump)
+//     counter index in the /osvbng/l2gw stats segment)
+//   - handoff_entry_index - handoff-direction counter index
 //
 // OsvbngL2gwAddDelCircuitReply defines message 'osvbng_l2gw_add_del_circuit_reply'.
 type OsvbngL2gwAddDelCircuitReply struct {
-	Retval    int32  `binapi:"i32,name=retval" json:"retval,omitempty"`
-	CircuitID uint32 `binapi:"u32,name=circuit_id" json:"circuit_id,omitempty"`
+	Retval            int32  `binapi:"i32,name=retval" json:"retval,omitempty"`
+	CircuitID         uint32 `binapi:"u32,name=circuit_id" json:"circuit_id,omitempty"`
+	HandoffEntryIndex uint32 `binapi:"u32,name=handoff_entry_index" json:"handoff_entry_index,omitempty"`
 }
 
 func (m *OsvbngL2gwAddDelCircuitReply) Reset() { *m = OsvbngL2gwAddDelCircuitReply{} }
 func (*OsvbngL2gwAddDelCircuitReply) GetMessageName() string {
 	return "osvbng_l2gw_add_del_circuit_reply"
 }
-func (*OsvbngL2gwAddDelCircuitReply) GetCrcString() string { return "2edf892d" }
+func (*OsvbngL2gwAddDelCircuitReply) GetCrcString() string { return "5c0a981e" }
 func (*OsvbngL2gwAddDelCircuitReply) GetMessageType() api.MessageType {
 	return api.ReplyMessage
 }
@@ -152,6 +154,7 @@ func (m *OsvbngL2gwAddDelCircuitReply) Size() (size int) {
 	}
 	size += 4 // m.Retval
 	size += 4 // m.CircuitID
+	size += 4 // m.HandoffEntryIndex
 	return size
 }
 func (m *OsvbngL2gwAddDelCircuitReply) Marshal(b []byte) ([]byte, error) {
@@ -161,12 +164,14 @@ func (m *OsvbngL2gwAddDelCircuitReply) Marshal(b []byte) ([]byte, error) {
 	buf := codec.NewBuffer(b)
 	buf.EncodeInt32(m.Retval)
 	buf.EncodeUint32(m.CircuitID)
+	buf.EncodeUint32(m.HandoffEntryIndex)
 	return buf.Bytes(), nil
 }
 func (m *OsvbngL2gwAddDelCircuitReply) Unmarshal(b []byte) error {
 	buf := codec.NewBuffer(b)
 	m.Retval = buf.DecodeInt32()
 	m.CircuitID = buf.DecodeUint32()
+	m.HandoffEntryIndex = buf.DecodeUint32()
 	return nil
 }
 
@@ -467,7 +472,7 @@ func (m *OsvbngL2gwEnableDisableReply) Unmarshal(b []byte) error {
 func init() { file_osvbng_l2gw_binapi_init() }
 func file_osvbng_l2gw_binapi_init() {
 	api.RegisterMessage((*OsvbngL2gwAddDelCircuit)(nil), "osvbng_l2gw_add_del_circuit_c8fb97ab")
-	api.RegisterMessage((*OsvbngL2gwAddDelCircuitReply)(nil), "osvbng_l2gw_add_del_circuit_reply_2edf892d")
+	api.RegisterMessage((*OsvbngL2gwAddDelCircuitReply)(nil), "osvbng_l2gw_add_del_circuit_reply_5c0a981e")
 	api.RegisterMessage((*OsvbngL2gwCircuitDetails)(nil), "osvbng_l2gw_circuit_details_c74b2751")
 	api.RegisterMessage((*OsvbngL2gwCircuitDump)(nil), "osvbng_l2gw_circuit_dump_1de1e584")
 	api.RegisterMessage((*OsvbngL2gwCircuitSetState)(nil), "osvbng_l2gw_circuit_set_state_daff7bad")
