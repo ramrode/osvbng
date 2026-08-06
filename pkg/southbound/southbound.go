@@ -20,4 +20,5 @@ type Southbound interface {
 	CGNATDataplane
 	MSSClamp
 	Policy
+	L2GW
 }
