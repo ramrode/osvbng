@@ -15,6 +15,7 @@ import (
 	aaacfg "github.com/veesix-networks/osvbng/pkg/config/aaa"
 	"github.com/veesix-networks/osvbng/pkg/config/subscriber"
 	"github.com/veesix-networks/osvbng/pkg/dataplane"
+	"github.com/veesix-networks/osvbng/pkg/dhcp6"
 	"github.com/veesix-networks/osvbng/pkg/events"
 	"github.com/veesix-networks/osvbng/pkg/logger"
 	"github.com/veesix-networks/osvbng/pkg/models"
@@ -53,8 +54,9 @@ func (c *Component) handleTrigger(pkt *dataplane.ParsedPacket) error {
 		}
 		proto = models.ProtocolDHCPv4
 	case pkt.DHCPv6 != nil:
-		if pkt.DHCPv6.MsgType != layers.DHCPv6MsgTypeSolicit &&
-			pkt.DHCPv6.MsgType != layers.DHCPv6MsgTypeRequest {
+		msgType, _ := dhcpv6TriggerIdentity(pkt)
+		if msgType != layers.DHCPv6MsgTypeSolicit &&
+			msgType != layers.DHCPv6MsgTypeRequest {
 			return nil
 		}
 		proto = models.ProtocolDHCPv6
@@ -91,7 +93,7 @@ func (c *Component) handleTrigger(pkt *dataplane.ParsedPacket) error {
 		case circuitStateRejected:
 			return nil
 		default:
-			// Auth in flight — hold the newest trigger for replay.
+			// Auth in flight, hold the newest trigger for replay.
 			ct.mu.Lock()
 			ct.pendingTrigger = buildPendingTrigger(pkt, proto)
 			ct.mu.Unlock()
@@ -166,6 +168,11 @@ func (c *Component) publishAAARequest(ct *Circuit, pkt *dataplane.ParsedPacket, 
 		cid, rid := parseOption82(dhcpOption(pkt.DHCPv4.Options, 82))
 		circuitID, remoteID = string(cid), string(rid)
 		hostname = string(dhcpOption(pkt.DHCPv4.Options, layers.DHCPOptHostname))
+	} else if pkt.DHCPv6 != nil {
+		if _, info := dhcpv6TriggerIdentity(pkt); info != nil {
+			circuitID = string(info.InterfaceID)
+			remoteID = string(info.RemoteID)
+		}
 	}
 
 	username := ct.MAC
@@ -500,6 +507,20 @@ func (c *Component) janitor() {
 			})
 		}
 	}
+}
+
+// dhcpv6TriggerIdentity resolves the effective client message type and,
+// for LDRA/relay-encapsulated triggers, the relay identity options
+// (interface-id 18, remote-id 37) used for AAA policy usernames.
+func dhcpv6TriggerIdentity(pkt *dataplane.ParsedPacket) (layers.DHCPv6MsgType, *dhcp6.RelayInfo) {
+	if pkt.DHCPv6.MsgType != layers.DHCPv6MsgTypeRelayForward {
+		return pkt.DHCPv6.MsgType, nil
+	}
+	msg, info := dhcp6.UnwrapRelay(pkt.DHCPv6.Contents)
+	if msg == nil {
+		return layers.DHCPv6MsgTypeUnspecified, info
+	}
+	return layers.DHCPv6MsgType(msg.MsgType), info
 }
 
 func dhcpv4MessageType(options layers.DHCPOptions) layers.DHCPMsgType {
