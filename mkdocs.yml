@@ -49,6 +49,7 @@ nav:
     - DHCPv6: configuration/dhcpv6.md
     - AAA: configuration/aaa.md
     - L2TP: configuration/l2tp.md
+    - L2GW (L2 Wholesale): configuration/l2gw.md
     - CGNAT: configuration/cgnat.md
     - QoS Policies: configuration/qos.md
     - Service Groups: configuration/service-groups.md
@@ -74,6 +75,7 @@ nav:
     - IPoE BNG: examples/ipoe-bng.md
     - PPPoE BNG: examples/pppoe-bng.md
     - IPoE + PPPoE BNG: examples/ipoe-pppoe-bng.md
+    - L2 Wholesale (L2GW): examples/l2gw-wholesale.md
     - L2TP LAC (Wholesale): examples/l2tp-lac.md
     - L2TP LNS: examples/l2tp-lns.md
     - Routing Policies: examples/routing-policies.md
