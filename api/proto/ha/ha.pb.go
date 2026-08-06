@@ -486,6 +486,17 @@ type SessionCheckpoint struct {
 	NegotiatedPppMtu uint32                 `protobuf:"varint,38,opt,name=negotiated_ppp_mtu,json=negotiatedPppMtu,proto3" json:"negotiated_ppp_mtu,omitempty"`
 	Ipv4Mss          uint32                 `protobuf:"varint,39,opt,name=ipv4_mss,json=ipv4Mss,proto3" json:"ipv4_mss,omitempty"`
 	Ipv6Mss          uint32                 `protobuf:"varint,40,opt,name=ipv6_mss,json=ipv6Mss,proto3" json:"ipv6_mss,omitempty"`
+	// l2gw wholesale circuit (access_type "l2gw"). Interfaces travel by
+	// name: sw_if_index values are locally scoped and never match across
+	// peers.
+	AccessInterface  string `protobuf:"bytes,41,opt,name=access_interface,json=accessInterface,proto3" json:"access_interface,omitempty"`
+	AccessTpid       uint32 `protobuf:"varint,42,opt,name=access_tpid,json=accessTpid,proto3" json:"access_tpid,omitempty"`
+	HandoffGroup     string `protobuf:"bytes,43,opt,name=handoff_group,json=handoffGroup,proto3" json:"handoff_group,omitempty"`
+	HandoffInterface string `protobuf:"bytes,44,opt,name=handoff_interface,json=handoffInterface,proto3" json:"handoff_interface,omitempty"`
+	HandoffSvlan     uint32 `protobuf:"varint,45,opt,name=handoff_svlan,json=handoffSvlan,proto3" json:"handoff_svlan,omitempty"`
+	HandoffCvlan     uint32 `protobuf:"varint,46,opt,name=handoff_cvlan,json=handoffCvlan,proto3" json:"handoff_cvlan,omitempty"`
+	HandoffTpid      uint32 `protobuf:"varint,47,opt,name=handoff_tpid,json=handoffTpid,proto3" json:"handoff_tpid,omitempty"`
+	Transparent      bool   `protobuf:"varint,48,opt,name=transparent,proto3" json:"transparent,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -791,6 +802,62 @@ func (x *SessionCheckpoint) GetIpv6Mss() uint32 {
 		return x.Ipv6Mss
 	}
 	return 0
+}
+
+func (x *SessionCheckpoint) GetAccessInterface() string {
+	if x != nil {
+		return x.AccessInterface
+	}
+	return ""
+}
+
+func (x *SessionCheckpoint) GetAccessTpid() uint32 {
+	if x != nil {
+		return x.AccessTpid
+	}
+	return 0
+}
+
+func (x *SessionCheckpoint) GetHandoffGroup() string {
+	if x != nil {
+		return x.HandoffGroup
+	}
+	return ""
+}
+
+func (x *SessionCheckpoint) GetHandoffInterface() string {
+	if x != nil {
+		return x.HandoffInterface
+	}
+	return ""
+}
+
+func (x *SessionCheckpoint) GetHandoffSvlan() uint32 {
+	if x != nil {
+		return x.HandoffSvlan
+	}
+	return 0
+}
+
+func (x *SessionCheckpoint) GetHandoffCvlan() uint32 {
+	if x != nil {
+		return x.HandoffCvlan
+	}
+	return 0
+}
+
+func (x *SessionCheckpoint) GetHandoffTpid() uint32 {
+	if x != nil {
+		return x.HandoffTpid
+	}
+	return 0
+}
+
+func (x *SessionCheckpoint) GetTransparent() bool {
+	if x != nil {
+		return x.Transparent
+	}
+	return false
 }
 
 type SyncSessionRequest struct {
@@ -1396,7 +1463,7 @@ const file_api_proto_ha_ha_proto_rawDesc = "" +
 	"\bgraceful\x18\x02 \x01(\bR\bgraceful\"H\n" +
 	"\x12SwitchoverResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\x89\v\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xb6\r\n" +
 	"\x11SessionCheckpoint\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
@@ -1445,7 +1512,16 @@ const file_api_proto_ha_ha_proto_rawDesc = "" +
 	"\x0eaaa_attributes\x18% \x03(\v22.osvbng.ha.v1.SessionCheckpoint.AaaAttributesEntryR\raaaAttributes\x12,\n" +
 	"\x12negotiated_ppp_mtu\x18& \x01(\rR\x10negotiatedPppMtu\x12\x19\n" +
 	"\bipv4_mss\x18' \x01(\rR\aipv4Mss\x12\x19\n" +
-	"\bipv6_mss\x18( \x01(\rR\aipv6Mss\x1a@\n" +
+	"\bipv6_mss\x18( \x01(\rR\aipv6Mss\x12)\n" +
+	"\x10access_interface\x18) \x01(\tR\x0faccessInterface\x12\x1f\n" +
+	"\vaccess_tpid\x18* \x01(\rR\n" +
+	"accessTpid\x12#\n" +
+	"\rhandoff_group\x18+ \x01(\tR\fhandoffGroup\x12+\n" +
+	"\x11handoff_interface\x18, \x01(\tR\x10handoffInterface\x12#\n" +
+	"\rhandoff_svlan\x18- \x01(\rR\fhandoffSvlan\x12#\n" +
+	"\rhandoff_cvlan\x18. \x01(\rR\fhandoffCvlan\x12!\n" +
+	"\fhandoff_tpid\x18/ \x01(\rR\vhandoffTpid\x12 \n" +
+	"\vtransparent\x180 \x01(\bR\vtransparent\x1a@\n" +
 	"\x12AaaAttributesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b#\x10$\"\xb8\x01\n" +

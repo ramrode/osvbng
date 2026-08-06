@@ -27,6 +27,7 @@ const (
 	NamespaceHASyncedIPoE      = "ha_synced_ipoe"
 	NamespaceHASyncedPPPoE     = "ha_synced_pppoe"
 	NamespaceHASyncedCGNAT     = "ha_synced_cgnat"
+	NamespaceHASyncedL2GW      = "ha_synced_l2gw"
 	// NamespaceAcctSessions holds per-session accounting state owned and
 	// evolved entirely by the internal/aaa component. Kept separate from
 	// the per-protocol session namespaces so AAA can extend its schema

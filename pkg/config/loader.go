@@ -153,6 +153,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.L2GW.Validate(); err != nil {
+		return err
+	}
+
 	if c.HA.Enabled && c.SubscriberGroups != nil {
 		for srgName, srg := range c.HA.SRGs {
 			for _, sg := range srg.SubscriberGroups {

@@ -187,6 +187,8 @@ const (
 	DHCPRelay Path = "dhcp.relay"
 	DHCPProxy Path = "dhcp.proxy"
 
+	L2GWCircuits Path = "l2gw.circuits"
+
 	L2TPTunnels Path = "l2tp.tunnels"
 	L2TPTunnel  Path = "l2tp.tunnels.<*>"
 

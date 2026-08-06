@@ -17,6 +17,7 @@ Supports ordered server failover with dead server detection and a three-tier att
 | `nas_port_id_format` | string | NAS-Port-Id template. See [placeholders](#nas-port-id-format) | `{interface}:{svlan}.{cvlan}` |
 | `dead_time` | duration | How long to skip a dead server | `30s` |
 | `dead_threshold` | int | Consecutive failures before marking dead | `3` |
+| `vendor_id` | int | Enterprise number for osvbng's own VSAs (see [Tier 2](#tier-2--common-vendor-defaults-always-active)) | `32473` |
 | `vrf` | string | Default VRF for outbound auth/accounting traffic. Per-server `vrf` overrides this. | |
 | `source_ip` | string | Default IPv4 source address for outbound auth/accounting. Per-server `source_ip` overrides this. | |
 | `source_ipv6` | string | Default IPv6 source address for outbound auth/accounting. Per-server `source_ipv6` overrides this. | |
@@ -74,6 +75,17 @@ The provider uses a three-tier attribute mapping system. All tiers are evaluated
 |---|---|---|---|---|
 | Microsoft | 311 | MS-Primary-DNS-Server | 28 | `dns_primary` |
 | Microsoft | 311 | MS-Secondary-DNS-Server | 29 | `dns_secondary` |
+| osvbng | `vendor_id` (default 32473) | OSVBNG-L2GW-Handoff-Group | 1 | `l2gw.handoff-group` |
+| osvbng | `vendor_id` (default 32473) | OSVBNG-L2GW-SVLAN | 2 | `l2gw.svlan` |
+| osvbng | `vendor_id` (default 32473) | OSVBNG-L2GW-CVLAN | 3 | `l2gw.cvlan` |
+
+The osvbng vendor attributes are also emitted in Accounting-Request
+packets with the resolved values whenever the session carries them (the
+wholesale billing feed). The default vendor id 32473 is the IANA-reserved
+documentation enterprise number (RFC 5612), an interim value until the
+project's own PEN assignment lands; pin a different number with the
+plugin's `vendor_id` setting. A matching FreeRADIUS dictionary ships in
+`contrib/freeradius/dictionary.osvbng`.
 
 Additional vendor attributes will be added over time based on deployment feedback. Use [Tier 3 custom mappings](#response-mappings) for vendor-specific attributes not yet covered.
 

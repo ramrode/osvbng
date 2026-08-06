@@ -199,7 +199,7 @@ func TestBuildTier1Index(t *testing.T) {
 }
 
 func TestBuildTier2Index(t *testing.T) {
-	idx := buildTier2Index()
+	idx := buildTier2Index(DefaultVendorID)
 	key := vendorKey{vendorID: 311, vendorType: 28}
 	if idx[key] == nil {
 		t.Fatal("MS-Primary-DNS-Server should be in tier2")
@@ -212,7 +212,7 @@ func TestBuildTier2Index(t *testing.T) {
 func TestExtractAttributes(t *testing.T) {
 	p := &Provider{
 		tier1Index: buildTier1Index(),
-		tier2Index: buildTier2Index(),
+		tier2Index: buildTier2Index(DefaultVendorID),
 	}
 
 	resp := radius.New(radius.CodeAccessAccept, []byte("testing123456789"))
@@ -239,7 +239,7 @@ func TestExtractAttributes(t *testing.T) {
 func TestExtractVSA(t *testing.T) {
 	p := &Provider{
 		tier1Index: buildTier1Index(),
-		tier2Index: buildTier2Index(),
+		tier2Index: buildTier2Index(DefaultVendorID),
 	}
 
 	t.Run("tier2 MS-DNS", func(t *testing.T) {
@@ -251,10 +251,43 @@ func TestExtractVSA(t *testing.T) {
 		}
 	})
 
+	t.Run("tier2 osvbng l2gw", func(t *testing.T) {
+		attrs := make(map[string]string)
+		p.extractVSA(radius.Attribute(buildVSA(DefaultVendorID, vsaL2GWHandoffGroup, []byte("isp-blue"))), attrs)
+		p.extractVSA(radius.Attribute(buildVSA(DefaultVendorID, vsaL2GWSVLAN, []byte("250"))), attrs)
+		p.extractVSA(radius.Attribute(buildVSA(DefaultVendorID, vsaL2GWCVLAN, []byte("1234"))), attrs)
+		if attrs[aaa.AttrL2GWHandoffGroup] != "isp-blue" {
+			t.Fatalf("l2gw.handoff-group: got %q", attrs[aaa.AttrL2GWHandoffGroup])
+		}
+		if attrs[aaa.AttrL2GWSVLAN] != "250" {
+			t.Fatalf("l2gw.svlan: got %q", attrs[aaa.AttrL2GWSVLAN])
+		}
+		if attrs[aaa.AttrL2GWCVLAN] != "1234" {
+			t.Fatalf("l2gw.cvlan: got %q", attrs[aaa.AttrL2GWCVLAN])
+		}
+	})
+
+	t.Run("tier2 osvbng l2gw custom vendor id", func(t *testing.T) {
+		p2 := &Provider{
+			tier1Index: buildTier1Index(),
+			tier2Index: buildTier2Index(4242),
+		}
+		attrs := make(map[string]string)
+		p2.extractVSA(radius.Attribute(buildVSA(4242, vsaL2GWHandoffGroup, []byte("isp-green"))), attrs)
+		if attrs[aaa.AttrL2GWHandoffGroup] != "isp-green" {
+			t.Fatalf("l2gw.handoff-group via custom vendor: got %q", attrs[aaa.AttrL2GWHandoffGroup])
+		}
+		attrs = make(map[string]string)
+		p2.extractVSA(radius.Attribute(buildVSA(DefaultVendorID, vsaL2GWHandoffGroup, []byte("isp-green"))), attrs)
+		if len(attrs) != 0 {
+			t.Fatalf("default vendor id must not decode when overridden: got %v", attrs)
+		}
+	})
+
 	t.Run("tier3 custom mapping", func(t *testing.T) {
 		p2 := &Provider{
 			tier1Index: buildTier1Index(),
-			tier2Index: buildTier2Index(),
+			tier2Index: buildTier2Index(DefaultVendorID),
 			tier3: []compiledCustomMapping{
 				{vendorID: 9, vendorType: 1, internal: "vrf"},
 			},
@@ -271,7 +304,7 @@ func TestExtractVSA(t *testing.T) {
 		re := mustCompileRegexp(`vrf-name=(.+)`)
 		p3 := &Provider{
 			tier1Index: buildTier1Index(),
-			tier2Index: buildTier2Index(),
+			tier2Index: buildTier2Index(DefaultVendorID),
 			tier3: []compiledCustomMapping{
 				{vendorID: 9, vendorType: 1, internal: "vrf", extract: re},
 			},

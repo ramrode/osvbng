@@ -184,3 +184,55 @@ func TestValidateSubscriberAccessTypes_MultipleParentInterfaces(t *testing.T) {
 		t.Fatalf("expected multi-parent-interface error, got %v", err)
 	}
 }
+
+func TestValidateSubscriberAccessTypes_MultipleL2GWParentInterfaces(t *testing.T) {
+	cfg := &Config{
+		SubscriberGroups: &subscriber.SubscriberGroupsConfig{
+			Groups: map[string]*subscriber.SubscriberGroup{
+				"access-operator-a": {
+					VLANs: []subscriber.VLANRange{
+						{SVLAN: "100-199", CVLAN: "any", ParentInterface: "eth1", AccessTypes: []subscriber.AccessType{subscriber.AccessTypeL2GW}},
+					},
+				},
+				"access-operator-b": {
+					VLANs: []subscriber.VLANRange{
+						{SVLAN: "100-199", CVLAN: "any", ParentInterface: "eth2", AccessTypes: []subscriber.AccessType{subscriber.AccessTypeL2GW}},
+					},
+				},
+			},
+		},
+		Interfaces: map[string]*interfaces.InterfaceConfig{
+			"eth1": {Name: "eth1", Enabled: true},
+			"eth2": {Name: "eth2", Enabled: true},
+		},
+	}
+	if err := ValidateSubscriberAccessTypes(cfg); err != nil {
+		t.Fatalf("l2gw groups must be allowed one NNI per access operator, got %v", err)
+	}
+}
+
+func TestValidateSubscriberAccessTypes_L2GWDoesNotCountTowardIPoEParent(t *testing.T) {
+	cfg := &Config{
+		SubscriberGroups: &subscriber.SubscriberGroupsConfig{
+			Groups: map[string]*subscriber.SubscriberGroup{
+				"retail": {
+					VLANs: []subscriber.VLANRange{
+						{SVLAN: "100", CVLAN: "any", ParentInterface: "eth1", AccessTypes: []subscriber.AccessType{subscriber.AccessTypeIPoE}},
+					},
+				},
+				"wholesale": {
+					VLANs: []subscriber.VLANRange{
+						{SVLAN: "200-299", CVLAN: "any", ParentInterface: "eth2", AccessTypes: []subscriber.AccessType{subscriber.AccessTypeL2GW}},
+					},
+				},
+			},
+		},
+		Interfaces: map[string]*interfaces.InterfaceConfig{
+			"eth1": {Name: "eth1", Enabled: true},
+			"eth2": {Name: "eth2", Enabled: true},
+		},
+	}
+	if err := ValidateSubscriberAccessTypes(cfg); err != nil {
+		t.Fatalf("l2gw NNI must not conflict with the ipoe access interface, got %v", err)
+	}
+}

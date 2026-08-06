@@ -60,6 +60,10 @@ func (c *Component) processDHCPPacket(pkt *dataplane.ParsedPacket) error {
 		}
 	}
 
+	if c.forwardToL2GW(pkt) {
+		return nil
+	}
+
 	msgType := getDHCPMessageType(pkt.DHCPv4.Options)
 	if msgType == layers.DHCPMsgTypeUnspecified {
 		return fmt.Errorf("missing DHCP message type")

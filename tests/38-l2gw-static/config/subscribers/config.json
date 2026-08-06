@@ -1,0 +1,39 @@
+{
+  "interfaces": {
+    "a10nsp": [
+      {
+        "interface": "eth2",
+        "qinq": false
+      }
+    ],
+    "access": [
+      {
+        "interface": "eth1",
+        "a10nsp-interface": "eth2",
+        "type": "ipoe",
+        "vlan-mode": "1:1",
+        "outer-vlan-min": 10,
+        "outer-vlan-max": 12,
+        "inner-vlan-min": 100,
+        "inner-vlan-max": 100
+      }
+    ]
+  },
+  "sessions": {
+    "count": 3
+  },
+  "dhcp": {
+    "enable": true,
+    "retry": 10
+  },
+  "dhcpv6": {
+    "enable": false
+  },
+  "ipoe": {
+    "ipv4": true,
+    "ipv6": false
+  },
+  "session-traffic": {
+    "ipv4-pps": 10
+  }
+}

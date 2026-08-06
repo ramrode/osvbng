@@ -39,3 +39,7 @@ func (v *VPP) GetBufferStats() ([]southbound.BufferStats, error) {
 }
 
 
+
+func (v *VPP) GetL2GWStats() (map[uint32]southbound.L2GWEntryStats, error) {
+	return v.statsClient.GetL2GWStats()
+}

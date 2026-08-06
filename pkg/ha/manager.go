@@ -70,6 +70,7 @@ type Manager struct {
 	bulkSyncCounts map[string]*atomic.Uint64
 
 	sessionIterators []SessionIterator
+	pendingAppliers  map[string]SyncApplier
 
 	ifToSRG     map[uint32]string
 	ifDownCount map[string]int
@@ -153,6 +154,12 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	if m.opdbStore != nil {
 		m.syncReceiver = NewSyncReceiver(m.opdbStore, m.registry, m.logger)
+		m.mu.Lock()
+		for accessType, fn := range m.pendingAppliers {
+			m.syncReceiver.RegisterApplier(accessType, fn)
+		}
+		m.pendingAppliers = nil
+		m.mu.Unlock()
 	}
 
 	m.registerSRGsWithDataplane()
@@ -308,6 +315,22 @@ func (m *Manager) GetSRGForGroup(subscriberGroup string) string {
 		}
 	}
 	return ""
+}
+
+// RegisterSyncApplier wires a component's eager checkpoint applier for
+// one access type. Callable before Start; appliers registered early are
+// transferred to the receiver when it is created.
+func (m *Manager) RegisterSyncApplier(accessType string, fn SyncApplier) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.syncReceiver != nil {
+		m.syncReceiver.RegisterApplier(accessType, fn)
+		return
+	}
+	if m.pendingAppliers == nil {
+		m.pendingAppliers = make(map[string]SyncApplier)
+	}
+	m.pendingAppliers[accessType] = fn
 }
 
 func (m *Manager) RegisterSessionIterator(iter SessionIterator) {
