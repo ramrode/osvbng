@@ -1,0 +1,52 @@
+# Copyright 2026 The osvbng Authors
+# Licensed under the GNU General Public License v3.0 or later.
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+l2gw:
+    handoff-groups:
+        isp-green:
+            interface: eth2
+            vlan-tpid: dot1q
+    static-maps:
+        - access-interface: eth1
+          svlan: "10-12"
+          handoff-group: isp-green
+          transparent: true
+
+interfaces:
+    eth1:
+        description: Access Interface
+        enabled: true
+    eth2:
+        description: Handoff (ISP green)
+        enabled: true
+
+aaa:
+    auth_provider: local
+    nas_identifier: osvbng
+
+plugins:
+    exporter.prometheus:
+        enabled: true
+        listen_address: :9090
+    northbound.api:
+        enabled: true
+        listeners:
+            - address: :8080
+
+monitoring:
+  collect_interval: 30s
+
+logging:
+    format: text
+    level: info
+    components:
+        l2gw: debug
+        dataplane: debug
+
+dataplane:
+    lcp-netns: dataplane
+    statseg:
+        size: "512m"
+        page-size: "4k"
+        per-node-counters: false
