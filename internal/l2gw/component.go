@@ -5,16 +5,19 @@
 // Package l2gw implements the layer 2 wholesale gateway control plane:
 // DHCP-triggered, AAA-authorized cross-connects of subscriber circuits
 // between access networks and retail ISP handoff ports. osvbng never
-// terminates DHCP or L3 for these subscribers — the retail ISP's BNG
+// terminates DHCP or L3 for these subscribers, the retail ISP's BNG
 // does; osvbng owns circuit steering, egress VLAN allocation, and
 // wholesale accounting.
 package l2gw
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/veesix-networks/osvbng/pkg/component"
+	"github.com/veesix-networks/osvbng/pkg/config/subscriber"
 	"github.com/veesix-networks/osvbng/pkg/dataplane"
 	"github.com/veesix-networks/osvbng/pkg/events"
 	"github.com/veesix-networks/osvbng/pkg/ha"
@@ -52,6 +55,7 @@ type Component struct {
 
 	aaaSub       events.Subscription
 	terminateSub events.Subscription
+	haStateSub   events.Subscription
 }
 
 func New(deps component.Dependencies, srgMgr ha.SRGProvider, ifMgr *ifmgr.Manager) (*Component, error) {
@@ -92,8 +96,17 @@ func (c *Component) Start(ctx context.Context) error {
 		c.logger.Error("Failed to apply l2gw static maps", "error", err)
 	}
 
+	if err := c.armTriggers(); err != nil {
+		c.logger.Error("Failed to arm l2gw trigger ranges", "error", err)
+	}
+
+	if err := c.restoreSyncedStandby(ctx); err != nil {
+		c.logger.Warn("Failed to restore HA-synced l2gw circuits", "error", err)
+	}
+
 	c.aaaSub = c.eventBus.Subscribe(events.TopicAAAResponseL2GW, c.handleAAAResponse)
 	c.terminateSub = c.eventBus.Subscribe(events.TopicSubscriberTerminate, c.handleSubscriberTerminate)
+	c.haStateSub = c.eventBus.Subscribe(events.TopicHAStateChange, c.handleHAStateChange)
 
 	c.Go(c.consumeTriggers)
 	c.Go(c.janitor)
@@ -117,9 +130,77 @@ func (c *Component) Stop(ctx context.Context) error {
 	if c.terminateSub != nil {
 		c.terminateSub.Unsubscribe()
 	}
+	if c.haStateSub != nil {
+		c.haStateSub.Unsubscribe()
+	}
 
 	c.StopContext()
 	return nil
+}
+
+// armTriggers arms the dataplane DHCP trigger snoop for every l2gw
+// subscriber-group VLAN range: the access port gets the l2gw-input
+// feature and its S-VLANs are registered so circuit-miss DHCP punts to
+// the control plane. Runs at Start; the first DISCOVER/SOLICIT on an
+// armed S-VLAN is the wholesale circuit trigger.
+func (c *Component) armTriggers() error {
+	cfg, err := c.cfgMgr.GetRunning()
+	if err != nil || cfg == nil || cfg.SubscriberGroups == nil {
+		return nil
+	}
+
+	for name, group := range cfg.SubscriberGroups.Groups {
+		if group == nil {
+			continue
+		}
+		for _, vr := range group.VLANs {
+			if !vr.HasAccessType(subscriber.AccessTypeL2GW) {
+				continue
+			}
+			portIdx, ok := c.ifMgr.GetSwIfIndex(vr.ParentInterface)
+			if !ok {
+				c.logger.Error("l2gw access interface not found",
+					"group", name, "interface", vr.ParentInterface)
+				continue
+			}
+			if err := c.armPort(portIdx, vr.ParentInterface); err != nil {
+				return fmt.Errorf("arm access port %s: %w", vr.ParentInterface, err)
+			}
+			svlans, err := vr.GetSVLANs()
+			if err != nil {
+				return fmt.Errorf("group %s svlan range: %w", name, err)
+			}
+			for _, r := range contiguousRanges(svlans) {
+				if err := c.vpp.L2GWTriggerSVLANRange(vr.ParentInterface, r[0], r[1], true); err != nil {
+					return fmt.Errorf("arm trigger svlans %d-%d on %s: %w",
+						r[0], r[1], vr.ParentInterface, err)
+				}
+			}
+			c.logger.Info("Armed l2gw trigger ranges",
+				"group", name, "interface", vr.ParentInterface, "svlans", vr.SVLAN)
+		}
+	}
+	return nil
+}
+
+func contiguousRanges(vlans []uint16) [][2]uint16 {
+	if len(vlans) == 0 {
+		return nil
+	}
+	sorted := append([]uint16(nil), vlans...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+
+	var out [][2]uint16
+	lo, hi := sorted[0], sorted[0]
+	for _, v := range sorted[1:] {
+		if v == hi || v == hi+1 {
+			hi = v
+			continue
+		}
+		out = append(out, [2]uint16{lo, hi})
+		lo, hi = v, v
+	}
+	return append(out, [2]uint16{lo, hi})
 }
 
 // armPort enables the l2gw-input feature on a port exactly once.
@@ -138,7 +219,7 @@ func (c *Component) armPort(swIfIndex uint32, name string) error {
 }
 
 // resolvePort maps a (possibly sub-)interface index to its parent port
-// index and name — the l2gw plugin keys circuits on the port, tags live
+// index and name, the l2gw plugin keys circuits on the port, tags live
 // in the packet.
 func (c *Component) resolvePort(swIfIndex uint32) (uint32, string) {
 	if c.ifMgr == nil {

@@ -31,13 +31,19 @@ func (c *Component) restoreCircuits(ctx context.Context) error {
 			return nil
 		}
 
-		// Interface indexes may have drifted across a VPP restart —
+		// Interface indexes may have drifted across a VPP restart,
 		// re-resolve by name before touching the dataplane.
 		if idx, ok := c.ifMgr.GetSwIfIndex(ct.AccessInterface); ok {
 			ct.AccessIfIndex = idx
 		}
 		if idx, ok := c.ifMgr.GetSwIfIndex(ct.HandoffInterface); ok {
 			ct.HandoffIfIndex = idx
+		}
+
+		// A restart while this node's SRG is standby must not resume
+		// forwarding; promotion batch-enables.
+		if c.srgMgr != nil && ct.SRGName != "" && !c.srgMgr.IsActive(ct.SRGName) {
+			ct.Standby = true
 		}
 
 		if err := c.armPort(ct.AccessIfIndex, ct.AccessInterface); err != nil {
@@ -75,15 +81,20 @@ func (c *Component) restoreCircuits(ctx context.Context) error {
 		// Refresh the checkpoint with re-resolved indexes.
 		c.checkpointCircuit(ct)
 
-		c.eventBus.Publish(events.TopicSessionRestored, events.Event{
-			Source: c.Name(),
-			Data: &events.SessionRestoredEvent{
-				AccessType: models.AccessTypeL2GW,
-				Protocol:   models.Protocol(ct.Protocol),
-				SessionID:  ct.SessionID,
-				Session:    ct.buildSessionModel(models.SessionStateActive),
-			},
-		})
+		// Standby circuits carry no accounting here, the active peer
+		// accounts; promotion publishes Restored when this node takes
+		// over.
+		if !ct.Standby {
+			c.eventBus.Publish(events.TopicSessionRestored, events.Event{
+				Source: c.Name(),
+				Data: &events.SessionRestoredEvent{
+					AccessType: models.AccessTypeL2GW,
+					Protocol:   models.Protocol(ct.Protocol),
+					SessionID:  ct.SessionID,
+					Session:    ct.buildSessionModel(models.SessionStateActive),
+				},
+			})
+		}
 		return nil
 	})
 

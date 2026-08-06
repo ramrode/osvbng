@@ -21,6 +21,7 @@ const (
 	circuitStateAuthenticating = "authenticating"
 	circuitStateInstalled      = "installed"
 	circuitStateRejected       = "rejected"
+	circuitStateStandby        = "standby"
 )
 
 // Circuit is one wholesale subscriber circuit: the access tuple that
@@ -52,6 +53,10 @@ type Circuit struct {
 	Static  bool   `json:"static,omitempty"`
 	State   string `json:"state"`
 	SRGName string `json:"srg_name,omitempty"`
+
+	// Standby marks an HA-synced circuit installed with forwarding
+	// disabled; promotion batch-enables it.
+	Standby bool `json:"standby,omitempty"`
 
 	CircuitID         uint32 `json:"circuit_id"`
 	AccessEntryIndex  uint32 `json:"access_entry_index"`
@@ -95,7 +100,7 @@ func (c *Component) installCircuit(ct *Circuit) error {
 		HandoffCVLAN:   ct.HandoffCVLAN,
 		HandoffTPID:    ct.HandoffTPID,
 		Transparent:    ct.Transparent,
-		Enabled:        true,
+		Enabled:        !ct.Standby,
 	})
 	if err != nil {
 		return err
@@ -104,7 +109,11 @@ func (c *Component) installCircuit(ct *Circuit) error {
 	ct.CircuitID = id
 	ct.AccessEntryIndex = id
 	ct.HandoffEntryIndex = handoffIdx
-	ct.State = circuitStateInstalled
+	if ct.Standby {
+		ct.State = circuitStateStandby
+	} else {
+		ct.State = circuitStateInstalled
+	}
 	ct.mu.Unlock()
 	return nil
 }
@@ -175,6 +184,8 @@ func (ct *Circuit) buildSessionModel(state models.SessionState) *models.L2GWSess
 		HandoffSVLAN:      ct.HandoffSVLAN,
 		HandoffCVLAN:      ct.HandoffCVLAN,
 		Transparent:       ct.Transparent,
+		AccessTPID:        ct.AccessTPID,
+		HandoffTPID:       ct.HandoffTPID,
 		CircuitID:         ct.CircuitID,
 		AccessEntryIndex:  ct.AccessEntryIndex,
 		HandoffEntryIndex: ct.HandoffEntryIndex,

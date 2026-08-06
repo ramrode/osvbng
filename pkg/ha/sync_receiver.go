@@ -18,6 +18,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// SyncApplier lets a component eagerly apply a synced checkpoint on the
+// standby (e.g. l2gw pre-installs circuits disabled) instead of waiting
+// for promotion-time restore. Called after the checkpoint is persisted.
+type SyncApplier func(action hapb.SyncAction, cp *hapb.SessionCheckpoint)
+
 type SyncReceiver struct {
 	opdb     opdb.Store
 	registry *allocator.Registry
@@ -25,6 +30,7 @@ type SyncReceiver struct {
 
 	lastSeq    map[string]uint64
 	lastRecvNs map[string]int64
+	appliers   map[string]SyncApplier
 	mu         sync.Mutex
 }
 
@@ -35,7 +41,20 @@ func NewSyncReceiver(store opdb.Store, registry *allocator.Registry, logger *log
 		logger:     logger,
 		lastSeq:    make(map[string]uint64),
 		lastRecvNs: make(map[string]int64),
+		appliers:   make(map[string]SyncApplier),
 	}
+}
+
+func (r *SyncReceiver) RegisterApplier(accessType string, fn SyncApplier) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.appliers[accessType] = fn
+}
+
+func (r *SyncReceiver) applierFor(accessType string) SyncApplier {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.appliers[accessType]
 }
 
 func (r *SyncReceiver) HandleSyncSession(ctx context.Context, req *hapb.SyncSessionRequest) (*hapb.SyncSessionResponse, error) {
@@ -72,6 +91,10 @@ func (r *SyncReceiver) HandleSyncSession(ctx context.Context, req *hapb.SyncSess
 		r.releaseAddresses(req.Session)
 	}
 
+	if fn := r.applierFor(req.Session.AccessType); fn != nil {
+		fn(req.Action, req.Session)
+	}
+
 	return &hapb.SyncSessionResponse{Success: true, LastSyncSeq: lastSeq}, nil
 }
 
@@ -87,6 +110,9 @@ func (r *SyncReceiver) HandleBulkSyncPage(ctx context.Context, resp *hapb.BulkSy
 			return err
 		}
 		r.reserveAddresses(cp)
+		if fn := r.applierFor(cp.AccessType); fn != nil {
+			fn(hapb.SyncAction_SYNC_ACTION_UPDATE, cp)
+		}
 	}
 
 	if resp.Sequence > 0 {
@@ -104,6 +130,9 @@ func (r *SyncReceiver) ClearSyncedNamespace(ctx context.Context, srgName string)
 	}
 	if err := r.opdb.Clear(ctx, opdb.NamespaceHASyncedPPPoE); err != nil {
 		return fmt.Errorf("clear synced pppoe: %w", err)
+	}
+	if err := r.opdb.Clear(ctx, opdb.NamespaceHASyncedL2GW); err != nil {
+		return fmt.Errorf("clear synced l2gw: %w", err)
 	}
 	return nil
 }
@@ -124,27 +153,28 @@ func (r *SyncReceiver) GetLastRecvTime(srgName string) time.Time {
 	return time.Unix(0, ns)
 }
 
+func syncedNamespace(accessType string) string {
+	switch accessType {
+	case "pppoe":
+		return opdb.NamespaceHASyncedPPPoE
+	case "l2gw":
+		return opdb.NamespaceHASyncedL2GW
+	default:
+		return opdb.NamespaceHASyncedIPoE
+	}
+}
+
 func (r *SyncReceiver) storeCheckpoint(ctx context.Context, cp *hapb.SessionCheckpoint) error {
 	data, err := proto.Marshal(cp)
 	if err != nil {
 		return fmt.Errorf("marshal checkpoint: %w", err)
 	}
 
-	ns := opdb.NamespaceHASyncedIPoE
-	if cp.AccessType == "pppoe" {
-		ns = opdb.NamespaceHASyncedPPPoE
-	}
-
-	return r.opdb.Put(ctx, ns, cp.SessionId, data)
+	return r.opdb.Put(ctx, syncedNamespace(cp.AccessType), cp.SessionId, data)
 }
 
 func (r *SyncReceiver) deleteCheckpoint(ctx context.Context, cp *hapb.SessionCheckpoint) error {
-	ns := opdb.NamespaceHASyncedIPoE
-	if cp.AccessType == "pppoe" {
-		ns = opdb.NamespaceHASyncedPPPoE
-	}
-
-	return r.opdb.Delete(ctx, ns, cp.SessionId)
+	return r.opdb.Delete(ctx, syncedNamespace(cp.AccessType), cp.SessionId)
 }
 
 func (r *SyncReceiver) reserveAddresses(cp *hapb.SessionCheckpoint) {

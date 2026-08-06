@@ -262,6 +262,20 @@ func sessionToCheckpoint(sess models.SubscriberSession) *hapb.SessionCheckpoint 
 				cp.Ipv6PrefixLen = uint32(ones)
 			}
 		}
+	case *models.L2GWSession:
+		cp.AccessType = "l2gw"
+		cp.AccessInterface = s.AccessInterface
+		cp.AccessTpid = uint32(s.AccessTPID)
+		cp.HandoffGroup = s.HandoffGroup
+		cp.HandoffInterface = s.HandoffInterface
+		cp.HandoffSvlan = uint32(s.HandoffSVLAN)
+		cp.HandoffCvlan = uint32(s.HandoffCVLAN)
+		cp.HandoffTpid = uint32(s.HandoffTPID)
+		cp.Transparent = s.Transparent
+		cp.AaaAttributes = s.Attributes
+		if !s.ActivatedAt.IsZero() {
+			cp.BoundAtNs = s.ActivatedAt.UnixNano()
+		}
 	case *models.PPPSession:
 		cp.AccessType = "pppoe"
 		cp.Vrf = s.VRF

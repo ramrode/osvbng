@@ -357,6 +357,8 @@ type L2GWSession struct {
 	HandoffSVLAN     uint16
 	HandoffCVLAN     uint16
 	Transparent      bool
+	AccessTPID       uint16
+	HandoffTPID      uint16
 
 	CircuitID         uint32
 	AccessEntryIndex  uint32

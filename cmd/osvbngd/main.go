@@ -465,6 +465,10 @@ func main() {
 	if haMgr != nil {
 		haMgr.RegisterSessionIterator(ipoeComp)
 		haMgr.RegisterSessionIterator(pppoeComp)
+		if l2gwComp != nil {
+			haMgr.RegisterSessionIterator(l2gwComp)
+			haMgr.RegisterSyncApplier("l2gw", l2gwComp.ApplySyncedCircuit)
+		}
 	}
 
 	wdCfg := cfg.Watchdog
@@ -598,6 +602,7 @@ func main() {
 		VRFManager:       vrfMgr,
 		SvcGroupResolver: svcGroupResolver,
 		CPPM:             cppmManager,
+		L2GW:             l2gwComp,
 		PluginComponents: pluginComponentsMap,
 	})
 

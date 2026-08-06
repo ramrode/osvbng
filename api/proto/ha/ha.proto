@@ -113,6 +113,18 @@ message SessionCheckpoint {
   uint32 negotiated_ppp_mtu = 38;
   uint32 ipv4_mss = 39;
   uint32 ipv6_mss = 40;
+
+  // l2gw wholesale circuit (access_type "l2gw"). Interfaces travel by
+  // name: sw_if_index values are locally scoped and never match across
+  // peers.
+  string access_interface = 41;
+  uint32 access_tpid = 42;
+  string handoff_group = 43;
+  string handoff_interface = 44;
+  uint32 handoff_svlan = 45;
+  uint32 handoff_cvlan = 46;
+  uint32 handoff_tpid = 47;
+  bool transparent = 48;
 }
 
 message SyncSessionRequest {
