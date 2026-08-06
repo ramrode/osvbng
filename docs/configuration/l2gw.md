@@ -39,6 +39,13 @@ RADIUS supplies them, and from the group's `svlan` / `svlan-range` /
 Static maps name their handoff group in configuration, so the exit interface
 is fixed at config time.
 
+The access side is typically not one network: each wholesale access
+operator (altnet, muni fiber, open-access network) lands on its own NNI
+port with its own VLAN plan, declared as its own subscriber group. l2gw
+ranges are exempt from the single-access-interface constraint that
+applies to locally terminated IPoE/PPPoE, so one osvbng can aggregate
+any number of access operator NNIs toward any number of ISP handoffs.
+
 ## `l2gw.handoff-groups`
 
 Bond/LACP interfaces are supported as handoff or access ports.
@@ -79,7 +86,7 @@ subscriber-groups:
           access-types: [l2gw]
       l2gw:
         handoff-group: isp-blue   # default when AAA returns no label
-      aaa-policy: circuit-policy  # same policy language as IPoE (MAC, VLANs, option-82)
+      aaa-policy: line-policy  # e.g. format "$svlan$.$cvlan$", the line's VLAN tuple
 ```
 
 ## AAA attributes
@@ -93,7 +100,16 @@ subscriber-groups:
 
 The trigger's Access-Request carries the usual circuit identity: MAC, S/C
 VLANs, access interface, and DHCPv4 option-82 `circuit_id` / `remote_id`
-when present. `aaa-policy` username formats work exactly as for IPoE.
+when present. DHCPv6 triggers arriving relay-encapsulated (an LDRA in the
+access network) contribute interface-id (option 18) as `circuit_id` and
+remote-id (option 37, enterprise prefix stripped) as `remote_id`.
+`aaa-policy` username formats work exactly as for IPoE.
+
+With the RADIUS provider these attributes map to built-in vendor-specific
+attributes (OSVBNG-L2GW-Handoff-Group/SVLAN/CVLAN, types 1-3) under the
+plugin's `vendor_id`; a matching FreeRADIUS dictionary ships in
+`contrib/freeradius/dictionary.osvbng`. The HTTP provider passes the
+internal names through verbatim.
 
 ## Lifecycle
 
@@ -111,6 +127,20 @@ when present. `aaa-policy` username formats work exactly as for IPoE.
 
 CoA policy push is deliberately not supported. Subscriber policy belongs to
 the retail ISP's BNG; osvbng is a layer 2 gateway in this role.
+
+## Configuration reload
+
+Committing changes to the `l2gw` block reconciles live state:
+
+- Static maps are diffed against installed static circuits: removed or
+  re-pointed maps tear their circuits down, new maps install immediately.
+- Egress VLAN allocators are rebuilt from the new handoff group ranges,
+  with live circuits' pairs re-marked so no in-use pair is ever
+  re-allocated.
+- Installed **dynamic** circuits are never touched by config commits:
+  they are session state, removed by RADIUS Disconnect-Message or
+  operator termination. A dynamic circuit whose handoff group was
+  re-pointed keeps forwarding on the old interface until re-established.
 
 ## Observability
 
@@ -150,5 +180,5 @@ subscriber-groups:
           access-types: [l2gw]
       l2gw:
         handoff-group: isp-blue
-      aaa-policy: circuit-policy
+      aaa-policy: line-policy
 ```
