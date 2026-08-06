@@ -113,6 +113,10 @@ func (c *Component) processDHCPv6Packet(pkt *dataplane.ParsedPacket) error {
 		}
 	}
 
+	if c.forwardToL2GW(pkt) {
+		return nil
+	}
+
 	rawDHCPv6 := append(pkt.DHCPv6.LayerContents(), pkt.DHCPv6.LayerPayload()...)
 
 	c.logger.WithGroup(logger.IPoEDHCP6).Debug("Received DHCPv6 packet",

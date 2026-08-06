@@ -21,6 +21,7 @@ import (
 	"github.com/veesix-networks/osvbng/internal/dataplane"
 	"github.com/veesix-networks/osvbng/internal/gateway"
 	"github.com/veesix-networks/osvbng/internal/ipoe"
+	l2gwcomp "github.com/veesix-networks/osvbng/internal/l2gw"
 	"github.com/veesix-networks/osvbng/internal/l2tp"
 	"github.com/veesix-networks/osvbng/internal/monitor"
 	"github.com/veesix-networks/osvbng/internal/pppoe"
@@ -360,6 +361,16 @@ func main() {
 		log.Fatalf("Failed to create ipoe component: %v", err)
 	}
 
+	var l2gwComp *l2gwcomp.Component
+	if cfg.L2GW != nil || cfg.SubscriberGroups.HasL2GWGroups() {
+		l2gwComp, err = l2gwcomp.New(coreDeps, srgProvider, ifMgr)
+		if err != nil {
+			log.Fatalf("Failed to create l2gw component: %v", err)
+		}
+		ipoeComp.SetL2GWChannel(l2gwComp.TriggerChan())
+		mainLog.Info("L2GW component created")
+	}
+
 	subscriberComp, err := subscriber.New(coreDeps, srgProvider)
 	if err != nil {
 		log.Fatalf("Failed to create subscriber component: %v", err)
@@ -547,6 +558,9 @@ func main() {
 	orch.Register(routingComp)
 	orch.Register(dataplaneComp)
 	orch.Register(ipoeComp)
+	if l2gwComp != nil {
+		orch.Register(l2gwComp)
+	}
 	orch.Register(subscriberComp)
 	orch.Register(arpComp)
 	orch.Register(pppoeComp)
@@ -604,6 +618,7 @@ func main() {
 		DHCPv6Providers:  dhcp6Providers,
 		CGNAT:            cgnat,
 		L2TP:             l2tpComp,
+		L2GW:             l2gwComp,
 		RunningConfig:    configd,
 		Orchestrator:     orch,
 	})

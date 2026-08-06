@@ -45,7 +45,12 @@ type AccountingSession struct {
 	// counters from when computing the next Acct-Interim cumulative.
 	// Re-resolved post-restore by handleSessionRestored to track VPP
 	// re-numbering across cold-restart.
-	swIfIndex uint32
+	//
+	// For l2gw sessions this is the access-direction entry index in the
+	// /osvbng/l2gw stats segment (subscriber upstream), and
+	// l2gwHandoffIndex is the handoff-direction entry (downstream).
+	swIfIndex        uint32
+	l2gwHandoffIndex uint32
 
 	// pendingSessionConfirm flags entries that loadAcctSessions pulled
 	// from opdb at Start() but that haven't yet been confirmed live by
@@ -82,6 +87,7 @@ type Component struct {
 	cache        cache.Cache
 	opdb         opdb.Store
 	showSource   component.ShowSource
+	vpp          southbound.Southbound
 
 	aaaReqSub    events.Subscription
 	lifecycleSub events.Subscription
@@ -105,6 +111,7 @@ func New(deps component.Dependencies, authProvider auth.AuthProvider) (*Componen
 		cache:        deps.Cache,
 		opdb:         deps.OpDB,
 		showSource:   deps.ShowSource,
+		vpp:          deps.Southbound,
 		buckets:      make(map[int][]string),
 		acctCache:    make(map[string]*AccountingSession),
 	}
@@ -223,14 +230,38 @@ func (c *Component) ProcessAccountingBucket(bucketId int) {
 	c.acctCacheMu.Lock()
 	defer c.acctCacheMu.Unlock()
 
+	var l2gwStats map[uint32]southbound.L2GWEntryStats
+	for _, sessionId := range sessionIds {
+		if session, exists := c.acctCache[sessionId]; exists &&
+			session.accessType == models.AccessTypeL2GW {
+			l2gwStats = c.fetchL2GWStats()
+			break
+		}
+	}
+
 	for _, sessionId := range sessionIds {
 		session, exists := c.acctCache[sessionId]
 		if !exists {
 			continue
 		}
 
-		go c.sendAccountingUpdate(session, statsByIdx)
+		go c.sendAccountingUpdate(session, statsByIdx, l2gwStats)
 	}
+}
+
+// fetchL2GWStats reads the per-circuit-direction counters from the l2gw
+// stats segment, once per bucket tick, only when the bucket holds l2gw
+// sessions.
+func (c *Component) fetchL2GWStats() map[uint32]southbound.L2GWEntryStats {
+	if c.vpp == nil {
+		return nil
+	}
+	stats, err := c.vpp.GetL2GWStats()
+	if err != nil {
+		c.logger.Debug("l2gw stats unavailable", "error", err)
+		return nil
+	}
+	return stats
 }
 
 // fetchInterfaceStats reads the cached SystemDataplaneInterfaces snapshot
@@ -260,13 +291,29 @@ func (c *Component) fetchInterfaceStats() map[uint32]*southbound.InterfaceStats 
 	return by
 }
 
-func (c *Component) sendAccountingUpdate(acctSession *AccountingSession, statsByIdx map[uint32]*southbound.InterfaceStats) {
+func (c *Component) sendAccountingUpdate(acctSession *AccountingSession, statsByIdx map[uint32]*southbound.InterfaceStats, l2gwStats map[uint32]southbound.L2GWEntryStats) {
 	acctSession.mu.Lock()
 	rxBytes, txBytes, rxPackets, txPackets := acctSession.lastReportedInOctets,
 		acctSession.lastReportedOutOctets,
 		acctSession.lastReportedInPackets,
 		acctSession.lastReportedOutPackets
-	if stats, ok := statsByIdx[acctSession.swIfIndex]; ok {
+	if acctSession.accessType == models.AccessTypeL2GW {
+		// l2gw circuits count in the plugin's own stats segment: the
+		// access-direction entry is subscriber upstream (input), the
+		// handoff-direction entry is downstream (output).
+		up, upOK := l2gwStats[acctSession.swIfIndex]
+		down, downOK := l2gwStats[acctSession.l2gwHandoffIndex]
+		if upOK || downOK {
+			synth := &southbound.InterfaceStats{
+				Index:   acctSession.swIfIndex,
+				Rx:      up.Packets,
+				RxBytes: up.Bytes,
+				Tx:      down.Packets,
+				TxBytes: down.Bytes,
+			}
+			rxBytes, txBytes, rxPackets, txPackets = acctSession.applyVPPCounters(synth)
+		}
+	} else if stats, ok := statsByIdx[acctSession.swIfIndex]; ok {
 		rxBytes, txBytes, rxPackets, txPackets = acctSession.applyVPPCounters(stats)
 	}
 	acctSession.mu.Unlock()
@@ -372,6 +419,8 @@ func (c *Component) publishResponse(requestID, sessionID string, accessType mode
 		topic = events.TopicAAAResponsePPPoE
 	case models.AccessTypeL2TP:
 		topic = events.TopicAAAResponseL2TP
+	case models.AccessTypeL2GW:
+		topic = events.TopicAAAResponseL2GW
 	default:
 		topic = events.TopicAAAResponse
 	}
@@ -442,7 +491,7 @@ func (c *Component) handleSessionLifecycle(event events.Event) {
 
 	var username, mac, ipv4Address, acctSessionID, accessInterface string
 	var sessionState models.SessionState
-	var swIfIndex, accessIfIndex uint32
+	var swIfIndex, accessIfIndex, l2gwHandoffIndex uint32
 	var svlan, cvlan uint16
 	attributes := make(map[string]string)
 
@@ -483,6 +532,24 @@ func (c *Component) handleSessionLifecycle(event events.Event) {
 				attributes[k] = v
 			}
 		}
+	case models.AccessTypeL2GW:
+		if sess, ok := data.Session.(*models.L2GWSession); ok {
+			sessionState = sess.State
+			if sess.MAC != nil {
+				mac = sess.MAC.String()
+			}
+			username = sess.Username
+			acctSessionID = sess.AAASessionID
+			swIfIndex = sess.AccessEntryIndex
+			l2gwHandoffIndex = sess.HandoffEntryIndex
+			accessIfIndex = sess.AccessIfIndex
+			accessInterface = sess.AccessInterface
+			svlan = sess.OuterVLAN
+			cvlan = sess.InnerVLAN
+			for k, v := range sess.Attributes {
+				attributes[k] = v
+			}
+		}
 	}
 	if ipv4Address != "" {
 		attributes["ipv4_address"] = ipv4Address
@@ -504,19 +571,20 @@ func (c *Component) handleSessionLifecycle(event events.Event) {
 
 	c.acctCacheMu.Lock()
 	acctSession := &AccountingSession{
-		sessionID:       sessionId,
-		acctSessionID:   acctSessionID,
-		accessType:      data.AccessType,
-		authDate:        event.Timestamp,
-		username:        username,
-		mac:             mac,
-		ipv4Address:     ipv4Address,
-		svlan:           svlan,
-		cvlan:           cvlan,
-		accessIfIndex:   accessIfIndex,
-		accessInterface: accessInterface,
-		attributes:      attributes,
-		swIfIndex:       swIfIndex,
+		sessionID:        sessionId,
+		acctSessionID:    acctSessionID,
+		accessType:       data.AccessType,
+		authDate:         event.Timestamp,
+		username:         username,
+		mac:              mac,
+		ipv4Address:      ipv4Address,
+		svlan:            svlan,
+		cvlan:            cvlan,
+		accessIfIndex:    accessIfIndex,
+		accessInterface:  accessInterface,
+		attributes:       attributes,
+		swIfIndex:        swIfIndex,
+		l2gwHandoffIndex: l2gwHandoffIndex,
 	}
 	c.acctCache[sessionId] = acctSession
 	c.acctCacheMu.Unlock()
@@ -586,6 +654,9 @@ func (c *Component) handleSessionRestored(event events.Event) {
 		existing.pendingSessionConfirm = false
 		existing.swIfIndex = swIfIndex
 		existing.ipv4Address = ipv4
+		if l2gwSess, ok := sess.(*models.L2GWSession); ok {
+			existing.l2gwHandoffIndex = l2gwSess.HandoffEntryIndex
+		}
 		if existing.acctSessionID == "" {
 			existing.acctSessionID = acctSessionID
 		}
@@ -599,7 +670,7 @@ func (c *Component) handleSessionRestored(event events.Event) {
 	// No persisted entry — restored session predates AAA accounting
 	// state (or the entry was pruned). Seed a fresh cache row from
 	// the session payload; counters start at zero.
-	c.acctCache[data.SessionID] = &AccountingSession{
+	seeded := &AccountingSession{
 		sessionID:     data.SessionID,
 		acctSessionID: acctSessionID,
 		accessType:    data.AccessType,
@@ -612,6 +683,10 @@ func (c *Component) handleSessionRestored(event events.Event) {
 		swIfIndex:     swIfIndex,
 		attributes:    map[string]string{"ipv4_address": ipv4},
 	}
+	if l2gwSess, ok := sess.(*models.L2GWSession); ok {
+		seeded.l2gwHandoffIndex = l2gwSess.HandoffEntryIndex
+	}
+	c.acctCache[data.SessionID] = seeded
 	c.logger.Info("Seeded acct cache from restored session with no prior checkpoint",
 		"session_id", data.SessionID,
 		"acct_session_id", acctSessionID,

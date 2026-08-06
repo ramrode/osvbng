@@ -61,6 +61,11 @@ type Component struct {
 	dhcp6Chan  <-chan *dataplane.ParsedPacket
 	ipv6NDChan <-chan *dataplane.ParsedPacket
 
+	// l2gwChan receives DHCP packets whose subscriber group has
+	// access-type l2gw: those circuits are wholesale L2 cross-connects,
+	// never terminated here. Set via SetL2GWChannel before Start.
+	l2gwChan chan<- *dataplane.ParsedPacket
+
 	aaaRespSub   events.Subscription
 	haStateSub   events.Subscription
 	mutationSub  events.Subscription
@@ -100,6 +105,30 @@ func New(deps component.Dependencies, srgMgr ha.SRGProvider, ifMgr *ifmgr.Manage
 	}
 
 	return c, nil
+}
+
+// SetL2GWChannel wires the l2gw component's trigger channel. Must be
+// called before Start.
+func (c *Component) SetL2GWChannel(ch chan<- *dataplane.ParsedPacket) {
+	c.l2gwChan = ch
+}
+
+// forwardToL2GW hands a DHCP packet to the l2gw component when its
+// subscriber group is wholesale-switched. Non-blocking: the l2gw
+// trigger queue is bounded and clients retransmit.
+func (c *Component) forwardToL2GW(pkt *dataplane.ParsedPacket) bool {
+	if c.l2gwChan == nil {
+		return false
+	}
+	match, ok := c.cfgMgr.LookupSubscriberGroup(pkt.OuterVLAN, pkt.InnerVLAN)
+	if !ok || !match.Group.HasAccessType(subscriber.AccessTypeL2GW) {
+		return false
+	}
+	select {
+	case c.l2gwChan <- pkt:
+	default:
+	}
+	return true
 }
 
 func (c *Component) Start(ctx context.Context) error {
