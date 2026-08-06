@@ -17,6 +17,7 @@ type RPCService interface {
 	OsvbngL2gwCircuitDump(ctx context.Context, in *OsvbngL2gwCircuitDump) (RPCService_OsvbngL2gwCircuitDumpClient, error)
 	OsvbngL2gwCircuitSetState(ctx context.Context, in *OsvbngL2gwCircuitSetState) (*OsvbngL2gwCircuitSetStateReply, error)
 	OsvbngL2gwEnableDisable(ctx context.Context, in *OsvbngL2gwEnableDisable) (*OsvbngL2gwEnableDisableReply, error)
+	OsvbngL2gwTriggerSvlanRange(ctx context.Context, in *OsvbngL2gwTriggerSvlanRange) (*OsvbngL2gwTriggerSvlanRangeReply, error)
 }
 
 type serviceClient struct {
@@ -90,6 +91,15 @@ func (c *serviceClient) OsvbngL2gwCircuitSetState(ctx context.Context, in *Osvbn
 
 func (c *serviceClient) OsvbngL2gwEnableDisable(ctx context.Context, in *OsvbngL2gwEnableDisable) (*OsvbngL2gwEnableDisableReply, error) {
 	out := new(OsvbngL2gwEnableDisableReply)
+	err := c.conn.Invoke(ctx, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, api.RetvalToVPPApiError(out.Retval)
+}
+
+func (c *serviceClient) OsvbngL2gwTriggerSvlanRange(ctx context.Context, in *OsvbngL2gwTriggerSvlanRange) (*OsvbngL2gwTriggerSvlanRangeReply, error) {
+	out := new(OsvbngL2gwTriggerSvlanRangeReply)
 	err := c.conn.Invoke(ctx, in, out)
 	if err != nil {
 		return nil, err
