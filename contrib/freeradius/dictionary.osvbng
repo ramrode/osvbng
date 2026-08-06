@@ -1,0 +1,26 @@
+# Copyright 2026 The osvbng Authors
+# Licensed under the GNU General Public License v3.0 or later.
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# osvbng vendor-specific RADIUS attributes.
+#
+# 32473 is the IANA-reserved documentation enterprise number (RFC 5612),
+# used as an interim value until the project's own PEN assignment lands.
+# If your deployment pins a different number via the radius plugin's
+# vendor_id setting, change the VENDOR line to match.
+#
+# Install: copy next to your FreeRADIUS dictionary and add
+#   $INCLUDE dictionary.osvbng
+# to /etc/freeradius/dictionary.
+
+VENDOR		osvbng			32473
+
+BEGIN-VENDOR	osvbng
+
+# Layer 2 wholesale gateway (l2gw). Sent in Access-Accept to steer the
+# circuit; echoed in Accounting-Request with the resolved values.
+ATTRIBUTE	OSVBNG-L2GW-Handoff-Group	1	string
+ATTRIBUTE	OSVBNG-L2GW-SVLAN		2	string
+ATTRIBUTE	OSVBNG-L2GW-CVLAN		3	string
+
+END-VENDOR	osvbng

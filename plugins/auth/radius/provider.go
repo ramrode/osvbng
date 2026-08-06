@@ -167,7 +167,7 @@ func New(cfg *config.Config) (auth.AuthProvider, error) {
 		reqMappings = append(reqMappings, cm)
 	}
 
-	var acctMappings []compiledRequestMapping
+	acctMappings := osvbngAcctMappings(pluginCfg.VendorID)
 	for _, m := range pluginCfg.AccountingMappings {
 		cm := compiledRequestMapping{
 			internal:   m.Internal,
@@ -191,7 +191,7 @@ func New(cfg *config.Config) (auth.AuthProvider, error) {
 		authConns:       authConns,
 		acctConns:       acctConns,
 		tier1Index:      tier1,
-		tier2Index:      buildTier2Index(),
+		tier2Index:      buildTier2Index(pluginCfg.VendorID),
 		tier3:           tier3,
 		requestMappings: reqMappings,
 		acctMappings:    acctMappings,

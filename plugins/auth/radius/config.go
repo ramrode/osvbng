@@ -44,6 +44,7 @@ type Config struct {
 	NASPortIDFormat    string            `json:"nas_port_id_format,omitempty" yaml:"nas_port_id_format,omitempty"`
 	DeadTime           time.Duration     `json:"dead_time,omitempty" yaml:"dead_time,omitempty"`
 	DeadThreshold      int               `json:"dead_threshold,omitempty" yaml:"dead_threshold,omitempty"`
+	VendorID           uint32            `json:"vendor_id,omitempty" yaml:"vendor_id,omitempty"`
 	Dictionaries       []string          `json:"dictionaries,omitempty" yaml:"dictionaries,omitempty"`
 	ResponseMappings   []CustomMapping   `json:"response_mappings,omitempty" yaml:"response_mappings,omitempty"`
 	RequestMappings    []RequestMapping  `json:"request_mappings,omitempty" yaml:"request_mappings,omitempty"`
@@ -118,6 +119,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.CoAReplayWindow == 0 {
 		c.CoAReplayWindow = DefaultCoAReplayWindow
+	}
+	if c.VendorID == 0 {
+		c.VendorID = DefaultVendorID
 	}
 }
 

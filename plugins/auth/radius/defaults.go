@@ -70,6 +70,10 @@ func decodeVSAIPv4(data []byte) string {
 	return net.IP(data).String()
 }
 
+func decodeVSAString(data []byte) string {
+	return string(data)
+}
+
 var tier1Mappings = []responseMapping{
 	{attrType: 8, internal: aaa.AttrIPv4Address, decode: decodeIPv4},
 	{attrType: 9, internal: aaa.AttrIPv4Netmask, decode: decodeIPv4},
@@ -103,11 +107,12 @@ type vendorKey struct {
 	vendorType byte
 }
 
-func buildTier2Index() map[vendorKey]*vendorMapping {
-	idx := make(map[vendorKey]*vendorMapping, len(tier2Mappings))
-	for i := range tier2Mappings {
-		k := vendorKey{vendorID: tier2Mappings[i].vendorID, vendorType: tier2Mappings[i].vendorType}
-		idx[k] = &tier2Mappings[i]
+func buildTier2Index(vendorID uint32) map[vendorKey]*vendorMapping {
+	all := append(osvbngVendorMappings(vendorID), tier2Mappings...)
+	idx := make(map[vendorKey]*vendorMapping, len(all))
+	for i := range all {
+		k := vendorKey{vendorID: all[i].vendorID, vendorType: all[i].vendorType}
+		idx[k] = &all[i]
 	}
 	return idx
 }
