@@ -50,6 +50,7 @@ const (
 	AccessTypePPPoE AccessType = "pppoe"
 	AccessTypeLAC   AccessType = "lac"
 	AccessTypeLNS   AccessType = "lns"
+	AccessTypeL2GW  AccessType = "l2gw"
 )
 
 type SubscriberGroup struct {
@@ -69,6 +70,14 @@ type SubscriberGroup struct {
 	MSSClamp            *MSSClampConfig        `json:"mss-clamp,omitempty" yaml:"mss-clamp,omitempty"`
 	DHCPv6              *SubscriberDHCPv6      `json:"dhcpv6,omitempty" yaml:"dhcpv6,omitempty"`
 	L2TP                *SubscriberL2TPConfig  `json:"l2tp,omitempty" yaml:"l2tp,omitempty"`
+	L2GW                *SubscriberL2GWConfig  `json:"l2gw,omitempty" yaml:"l2gw,omitempty"`
+}
+
+// SubscriberL2GWConfig binds an l2gw access-type group to a default
+// handoff group in the top-level l2gw.handoff-groups block. RADIUS may
+// override per subscriber via the l2gw.handoff-group attribute.
+type SubscriberL2GWConfig struct {
+	HandoffGroup string `json:"handoff-group,omitempty" yaml:"handoff-group,omitempty"`
 }
 
 // SubscriberL2TPConfig is the per-subscriber-group L2TP binding. It
@@ -230,4 +239,18 @@ func (v *VLANRange) MatchesSVLAN(svlan uint16) bool {
 type VLANAAAs struct {
 	Enabled bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Policy  string `json:"policy,omitempty" yaml:"policy,omitempty"`
+}
+
+// HasL2GWGroups reports whether any subscriber group is wholesale
+// layer-2 switched.
+func (sgc *SubscriberGroupsConfig) HasL2GWGroups() bool {
+	if sgc == nil {
+		return false
+	}
+	for _, g := range sgc.Groups {
+		if g.HasAccessType(AccessTypeL2GW) {
+			return true
+		}
+	}
+	return false
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/veesix-networks/osvbng/pkg/config/cgnat"
 	"github.com/veesix-networks/osvbng/pkg/config/interfaces"
 	"github.com/veesix-networks/osvbng/pkg/config/ip"
+	l2gwcfg "github.com/veesix-networks/osvbng/pkg/config/l2gw"
 	"github.com/veesix-networks/osvbng/pkg/config/l2tp"
 	"github.com/veesix-networks/osvbng/pkg/config/protocols"
 	"github.com/veesix-networks/osvbng/pkg/config/qos"
@@ -35,6 +36,7 @@ type Config struct {
 	CGNAT            *cgnat.Config                      `json:"cgnat,omitempty" yaml:"cgnat,omitempty"`
 	HA               HAConfig                           `json:"ha,omitempty" yaml:"ha,omitempty"`
 	L2TP             *l2tp.L2TPConfig                   `json:"l2tp,omitempty" yaml:"l2tp,omitempty"`
+	L2GW             *l2gwcfg.L2GWConfig                `json:"l2gw,omitempty" yaml:"l2gw,omitempty"`
 
 	// Walked in struct order — dependency order matters
 	System          *SystemConfig                          `json:"system,omitempty" yaml:"system,omitempty"`

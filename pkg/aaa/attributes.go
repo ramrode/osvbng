@@ -65,3 +65,13 @@ const (
 	AttrTunnelAcctConnection  = "tunnel.acct-connection"
 	AttrTunnelAcctPacketsLost = "tunnel.acct-packets-lost"
 )
+
+// Layer 2 wholesale gateway attributes. RADIUS (or any auth provider)
+// selects the egress by handoff-group label; explicit S/C-VLAN values
+// override osvbng's per-group egress VLAN allocator. Accounting reports
+// the resolved values back under the same names.
+const (
+	AttrL2GWHandoffGroup = "l2gw.handoff-group"
+	AttrL2GWSVLAN        = "l2gw.svlan"
+	AttrL2GWCVLAN        = "l2gw.cvlan"
+)

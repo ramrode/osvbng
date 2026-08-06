@@ -16,6 +16,7 @@ var validAccessTypes = map[subscriber.AccessType]struct{}{
 	subscriber.AccessTypePPPoE: {},
 	subscriber.AccessTypeLAC:   {},
 	subscriber.AccessTypeLNS:   {},
+	subscriber.AccessTypeL2GW:  {},
 }
 
 func ValidateSubscriberAccessTypes(cfg *Config) error {
@@ -86,7 +87,7 @@ func validateVLANRangeAccessTypes(groupName string, idx int, vr *subscriber.VLAN
 	seen := map[subscriber.AccessType]struct{}{}
 	for _, a := range vr.AccessTypes {
 		if _, ok := validAccessTypes[a]; !ok {
-			return fmt.Errorf("subscriber group %q vlans[%d]: access-types entry %q is not one of ipoe, pppoe, lac, lns", groupName, idx, a)
+			return fmt.Errorf("subscriber group %q vlans[%d]: access-types entry %q is not one of ipoe, pppoe, lac, lns, l2gw", groupName, idx, a)
 		}
 		if _, dup := seen[a]; dup {
 			return fmt.Errorf("subscriber group %q vlans[%d]: access-types contains duplicate %q", groupName, idx, a)
@@ -98,7 +99,11 @@ func validateVLANRangeAccessTypes(groupName string, idx int, vr *subscriber.VLAN
 	hasPPPoE := vr.HasAccessType(subscriber.AccessTypePPPoE)
 	hasLAC := vr.HasAccessType(subscriber.AccessTypeLAC)
 	hasLNS := vr.HasAccessType(subscriber.AccessTypeLNS)
+	hasL2GW := vr.HasAccessType(subscriber.AccessTypeL2GW)
 
+	if hasL2GW && len(vr.AccessTypes) > 1 {
+		return fmt.Errorf("subscriber group %q vlans[%d]: l2gw is mutually exclusive with other access-types (got %v)", groupName, idx, vr.AccessTypes)
+	}
 	if hasLAC && (hasLNS || hasIPoE || hasPPPoE) {
 		return fmt.Errorf("subscriber group %q vlans[%d]: lac is mutually exclusive with other access-types (got %v)", groupName, idx, vr.AccessTypes)
 	}

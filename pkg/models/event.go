@@ -44,6 +44,7 @@ const (
 	AccessTypeIPoE    AccessType = "ipoe"
 	AccessTypePPPoE   AccessType = "pppoe"
 	AccessTypeL2TP    AccessType = "l2tp"
+	AccessTypeL2GW    AccessType = "l2gw"
 	AccessTypeUnknown AccessType = "unknown"
 )
 

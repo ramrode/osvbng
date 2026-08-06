@@ -333,3 +333,64 @@ func (s *SessionStats) Marshal() ([]byte, error) {
 func (s *SessionStats) Unmarshal(data []byte) error {
 	return json.Unmarshal(data, s)
 }
+
+// L2GWSession is the wholesale layer 2 circuit session model. There is
+// no L3 state: the "session" is a bidirectional cross-connect between an
+// access circuit and an ISP handoff, with per-direction dataplane
+// counter indices for accounting.
+type L2GWSession struct {
+	SessionID    string
+	AAASessionID string
+	State        SessionState
+	Protocol     string
+
+	MAC       net.HardwareAddr
+	OuterVLAN uint16
+	InnerVLAN uint16
+
+	AccessIfIndex   uint32
+	AccessInterface string
+
+	HandoffGroup     string
+	HandoffInterface string
+	HandoffIfIndex   uint32
+	HandoffSVLAN     uint16
+	HandoffCVLAN     uint16
+	Transparent      bool
+
+	CircuitID         uint32
+	AccessEntryIndex  uint32
+	HandoffEntryIndex uint32
+
+	Username    string
+	SRGName     string
+	ActivatedAt time.Time
+	Attributes  map[string]string
+}
+
+func (s *L2GWSession) GetSessionID() string      { return s.SessionID }
+func (s *L2GWSession) GetAccessType() AccessType { return AccessTypeL2GW }
+func (s *L2GWSession) GetProtocol() Protocol     { return Protocol(s.Protocol) }
+func (s *L2GWSession) GetState() SessionState    { return s.State }
+func (s *L2GWSession) GetMAC() net.HardwareAddr  { return s.MAC }
+func (s *L2GWSession) GetOuterVLAN() uint16      { return s.OuterVLAN }
+func (s *L2GWSession) GetInnerVLAN() uint16      { return s.InnerVLAN }
+func (s *L2GWSession) GetAAASessionID() string   { return s.AAASessionID }
+func (s *L2GWSession) GetIPv4Address() net.IP    { return nil }
+func (s *L2GWSession) GetIPv6Address() net.IP    { return nil }
+func (s *L2GWSession) GetIPv6Prefix() string     { return "" }
+func (s *L2GWSession) GetIfIndex() uint32        { return s.AccessEntryIndex }
+func (s *L2GWSession) GetVLANCount() int {
+	n := 0
+	if s.OuterVLAN != 0 {
+		n++
+	}
+	if s.InnerVLAN != 0 {
+		n++
+	}
+	return n
+}
+func (s *L2GWSession) GetUsername() string       { return s.Username }
+func (s *L2GWSession) GetServiceGroup() string   { return "" }
+func (s *L2GWSession) GetSRGName() string        { return s.SRGName }
+func (s *L2GWSession) GetActivatedAt() time.Time { return s.ActivatedAt }

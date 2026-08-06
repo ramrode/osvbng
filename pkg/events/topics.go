@@ -31,6 +31,9 @@ const (
 	TopicAAAResponseL2TP = "osvbng:events:aaa:response:l2tp"
 	TopicL2TPLACDecision = "osvbng:events:l2tp:lac:decision"
 
+	// Layer 2 wholesale gateway
+	TopicAAAResponseL2GW = "osvbng:events:aaa:response:l2gw"
+
 	// TopicComponentReady fires when a component transitions out of its
 	// recovery window into StateReady. Carries a ComponentReadyEvent.
 	// Consumers that depend on a specific component's recovery completing
