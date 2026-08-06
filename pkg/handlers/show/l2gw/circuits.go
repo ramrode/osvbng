@@ -11,10 +11,12 @@ import (
 	"github.com/veesix-networks/osvbng/pkg/deps"
 	"github.com/veesix-networks/osvbng/pkg/handlers/show"
 	"github.com/veesix-networks/osvbng/pkg/handlers/show/paths"
+	"github.com/veesix-networks/osvbng/pkg/telemetry"
 )
 
 func init() {
 	show.RegisterFactory(NewCircuitsHandler)
+	telemetry.RegisterMetric[l2gwcomp.CircuitSummary](paths.L2GWCircuits)
 }
 
 type CircuitsHandler struct {
