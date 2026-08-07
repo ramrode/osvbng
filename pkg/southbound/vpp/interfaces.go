@@ -253,6 +253,10 @@ func (v *VPP) DeleteInterface(name string) error {
 		return v.deleteVxlanTunnel(ch, iface)
 	}
 
+	if strings.EqualFold(iface.DevType, "loopback") {
+		return v.deletePseudowire(iface)
+	}
+
 	if iface.DevType == "bond" {
 		req := &bond.BondDelete{
 			SwIfIndex: interface_types.InterfaceIndex(iface.SwIfIndex),
@@ -337,6 +341,14 @@ func (v *VPP) GetInterfaceIndex(name string) (int, error) {
 }
 
 func (v *VPP) SetInterfacePromiscuous(ifaceName string, on bool) error {
+	// Loopback-backed interfaces (pseudowire headends) have no NIC
+	// filter to open up: every frame already reaches ethernet-input via
+	// the tunnel decap path, and VPP rejects promisc on loopbacks.
+	if iface := v.ifMgr.GetByName(ifaceName); iface != nil && strings.EqualFold(iface.DevType, "loopback") {
+		v.logger.Debug("Skipping promiscuous on loopback-backed interface", "interface", ifaceName)
+		return nil
+	}
+
 	link, h, err := v.findLink(ifaceName)
 	if err != nil {
 		if vppErr := v.setInterfacePromiscVPP(ifaceName, on); vppErr != nil {
@@ -844,6 +856,8 @@ func (v *VPP) CreateInterface(cfg *interfaces.InterfaceConfig) error {
 		return v.createLoopback(cfg)
 	case "vxlan":
 		return v.createVxlanTunnel(cfg)
+	case "pseudowire":
+		return v.createPseudowire(cfg)
 	case "physical":
 		return v.createPhysicalInterface(cfg)
 	}
@@ -1786,6 +1800,10 @@ func inferInterfaceType(cfg *interfaces.InterfaceConfig) string {
 
 	if cfg.Vxlan != nil {
 		return "vxlan"
+	}
+
+	if cfg.Pseudowire != nil {
+		return "pseudowire"
 	}
 
 	if len(cfg.Name) >= 4 && cfg.Name[:4] == "loop" {
