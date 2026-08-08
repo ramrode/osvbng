@@ -42,6 +42,7 @@ import (
 	"github.com/veesix-networks/osvbng/pkg/dhcp4"
 	"github.com/veesix-networks/osvbng/pkg/dhcp6"
 	"github.com/veesix-networks/osvbng/pkg/events/local"
+	"github.com/veesix-networks/osvbng/pkg/evpnmgr"
 	"github.com/veesix-networks/osvbng/pkg/ha"
 	_ "github.com/veesix-networks/osvbng/pkg/handlers/conf/all"
 	"github.com/veesix-networks/osvbng/pkg/handlers/oper"
@@ -187,6 +188,8 @@ func main() {
 	vrfmgr.Set(vrfMgr)
 	vpp.SetVRFResolver(vrfMgr.ResolveVRF)
 
+	evpnMgr := evpnmgr.New(vpp)
+
 	if err := vpp.SetLCPNetNs(config.LCPNetNs); err != nil {
 		mainLog.Warn("LCP netns not available, LCP interfaces will use default namespace", "ns", config.LCPNetNs, "error", err)
 	}
@@ -200,6 +203,7 @@ func main() {
 			mainLog.Warn("Failed to create netlink handle for VRF manager", "ns", config.LCPNetNs, "error", err)
 		} else {
 			vrfMgr.SetNetlinkHandle(nlHandle)
+			evpnMgr.SetNetlinkHandle(nlHandle)
 			netbind.SetLCPNetNs(config.LCPNetNs)
 			mainLog.Info("VRF manager configured for LCP namespace", "ns", config.LCPNetNs)
 		}
@@ -220,16 +224,19 @@ func main() {
 		CPPM:             cppmManager,
 		Routing:          nil,
 		VRFManager:       vrfMgr,
+		EVPNMirror:       evpnMgr,
 		SvcGroupResolver: svcGroupResolver,
 		PluginComponents: nil,
 	})
 
-	if err := bootstrapDataplane(mainLog, configd, vpp, vrfMgr, svcGroupResolver, cppmManager, cfg, accessInterface); err != nil {
+	if err := bootstrapDataplane(mainLog, configd, vpp, vrfMgr, evpnMgr, svcGroupResolver, cppmManager, cfg, accessInterface); err != nil {
 		log.Fatalf("Failed to bootstrap dataplane: %v", err)
 	}
 
 	eventBus := local.NewBus()
 	cache := memory.New()
+
+	evpnMgr.SetEventBus(eventBus)
 
 	opdbStore, err := sqlite.Open("/var/lib/osvbng/opdb.db")
 	if err != nil {
@@ -500,7 +507,7 @@ func main() {
 
 					if ifCount <= 1 {
 						mainLog.Info("VPP recovery: dataplane state lost, bootstrapping")
-						if err := bootstrapDataplane(mainLog, configd, vpp, vrfMgr, svcGroupResolver, cppmManager, cfg, accessInterface); err != nil {
+						if err := bootstrapDataplane(mainLog, configd, vpp, vrfMgr, evpnMgr, svcGroupResolver, cppmManager, cfg, accessInterface); err != nil {
 							return fmt.Errorf("bootstrap dataplane: %w", err)
 						}
 
@@ -662,6 +669,15 @@ func main() {
 		log.Fatalf("Failed to start components: %v", err)
 	}
 
+	// Started after the components so that consumers of
+	// TopicEVPNTunnelProgrammed (l2gw trigger re-arming) are subscribed
+	// before the first discovery can replace a tunnel.
+	evpnStop := make(chan struct{})
+	defer close(evpnStop)
+	if err := evpnMgr.Start(nsHandle, evpnStop); err != nil {
+		mainLog.Warn("Failed to start EVPN remote VTEP watcher", "error", err)
+	}
+
 	telemetry.StartShowPollers(ctx, showRegistry, mainLog)
 
 	// AllReady checks every component's punt-side ReadyState
@@ -782,6 +798,7 @@ func bootstrapDataplane(
 	configd *configmgr.ConfigManager,
 	sb *vpp.VPP,
 	vrfMgr *vrfmgr.Manager,
+	evpnMgr *evpnmgr.Manager,
 	svcGroupResolver *svcgroup.Resolver,
 	cppmManager *cppm.Manager,
 	cfg *config.Config,
@@ -813,6 +830,7 @@ func bootstrapDataplane(
 		Southbound:       sb,
 		CPPM:             cppmManager,
 		VRFManager:       vrfMgr,
+		EVPNMirror:       evpnMgr,
 		SvcGroupResolver: svcGroupResolver,
 	})
 
@@ -836,6 +854,29 @@ func bootstrapDataplane(
 		}
 	}
 	configd.CloseCandidateSession(infraSess)
+
+	desiredMirrors := make(map[uint32]evpnmgr.TunnelSpec)
+	for name, iface := range cfg.Interfaces {
+		if iface == nil || iface.Vxlan == nil || !iface.Vxlan.EVPNSignaled() {
+			continue
+		}
+		spec := evpnmgr.TunnelSpec{
+			Interface: name,
+			VNI:       iface.Vxlan.VNI,
+			Src:       iface.Vxlan.Src,
+			MTU:       iface.MTU,
+		}
+		for pwName, pwIface := range cfg.Interfaces {
+			if pwIface != nil && pwIface.Pseudowire != nil && pwIface.Pseudowire.Transport == name {
+				spec.Pseudowire = pwName
+				break
+			}
+		}
+		desiredMirrors[iface.Vxlan.VNI] = spec
+	}
+	if err := evpnMgr.Reconcile(desiredMirrors); err != nil {
+		log.Warn("Failed to reconcile EVPN mirror devices", "error", err)
+	}
 
 	log.Info("Dataplane bootstrap complete")
 	return nil

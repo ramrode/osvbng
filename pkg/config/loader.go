@@ -182,6 +182,17 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	evpnVNIs := make(map[uint32]string)
+	for ifName, iface := range c.Interfaces {
+		if iface == nil || iface.Vxlan == nil || !iface.Vxlan.EVPNSignaled() {
+			continue
+		}
+		if prev, ok := evpnVNIs[iface.Vxlan.VNI]; ok {
+			return fmt.Errorf("interfaces.%s.vxlan: vni %d already used by evpn-signaled interface %q", ifName, iface.Vxlan.VNI, prev)
+		}
+		evpnVNIs[iface.Vxlan.VNI] = ifName
+	}
+
 	if c.SubscriberGroups != nil {
 		for groupName, group := range c.SubscriberGroups.Groups {
 			if err := validateVLANTpid(group.VLANTpid); err != nil {

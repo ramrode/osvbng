@@ -16,6 +16,11 @@ import (
 	"github.com/veesix-networks/osvbng/pkg/vpp/binapi/osvbng_tunnel"
 )
 
+const (
+	pwInstanceBase  = 8000
+	pwInstanceRange = 512
+)
+
 type pwBinding struct {
 	transport        string
 	tunnelSwIfIndex  uint32
@@ -84,22 +89,35 @@ func (v *VPP) createPseudowire(cfg *interfaces.InterfaceConfig) error {
 	}
 	defer ch.Close()
 
-	req := &vppinterfaces.CreateLoopbackInstance{
-		IsSpecified: false,
-	}
-	if cfg.Pseudowire.MACAddress != "" {
-		mac, err := net.ParseMAC(cfg.Pseudowire.MACAddress)
-		if err != nil {
-			return fmt.Errorf("parse pseudowire mac-address: %w", err)
+	// Headends claim explicit instances from a high base: an auto
+	// instance would take the lowest free slot (0, 1, ...), which is
+	// exactly the namespace config loopbacks (loopN = instance N)
+	// allocate from, and a headend created before its loopN twin
+	// permanently steals the instance and fails the commit.
+	var reply *vppinterfaces.CreateLoopbackInstanceReply
+	for instance := uint32(pwInstanceBase); instance < pwInstanceBase+pwInstanceRange; instance++ {
+		req := &vppinterfaces.CreateLoopbackInstance{
+			IsSpecified:  true,
+			UserInstance: instance,
 		}
-		copy(req.MacAddress[:], mac)
+		if cfg.Pseudowire.MACAddress != "" {
+			mac, err := net.ParseMAC(cfg.Pseudowire.MACAddress)
+			if err != nil {
+				return fmt.Errorf("parse pseudowire mac-address: %w", err)
+			}
+			copy(req.MacAddress[:], mac)
+		}
+		r := &vppinterfaces.CreateLoopbackInstanceReply{}
+		if err := ch.SendRequest(req).ReceiveReply(r); err != nil {
+			return fmt.Errorf("create pseudowire headend: %w", err)
+		}
+		if r.Retval == 0 {
+			reply = r
+			break
+		}
 	}
-	reply := &vppinterfaces.CreateLoopbackInstanceReply{}
-	if err := ch.SendRequest(req).ReceiveReply(reply); err != nil {
-		return fmt.Errorf("create pseudowire headend: %w", err)
-	}
-	if reply.Retval != 0 {
-		return fmt.Errorf("create pseudowire headend failed: retval=%d", reply.Retval)
+	if reply == nil {
+		return fmt.Errorf("create pseudowire headend failed: no free instance in %d-%d", pwInstanceBase, pwInstanceBase+pwInstanceRange-1)
 	}
 	swIfIndex := uint32(reply.SwIfIndex)
 
@@ -184,6 +202,39 @@ func (v *VPP) BindPseudowire(name, transport string) error {
 	v.pwMu.Unlock()
 
 	v.logger.Info("Bound pseudowire to transport", "interface", name, "transport", transport)
+	return nil
+}
+
+func (v *VPP) UnbindPseudowire(name string) error {
+	v.pwMu.Lock()
+	binding, bound := v.pwBindings[name]
+	delete(v.pwBindings, name)
+	v.pwMu.Unlock()
+
+	if !bound {
+		return nil
+	}
+
+	ch, err := v.conn.NewAPIChannel()
+	if err != nil {
+		return fmt.Errorf("create API channel: %w", err)
+	}
+	defer ch.Close()
+
+	req := &osvbng_tunnel.OsvbngPwBind{
+		TunnelSwIfIndex:  binding.tunnelSwIfIndex,
+		HeadendSwIfIndex: binding.headendSwIfIndex,
+		IsBind:           false,
+	}
+	reply := &osvbng_tunnel.OsvbngPwBindReply{}
+	if err := ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("pw unbind: %w", err)
+	}
+	if reply.Retval != 0 {
+		return fmt.Errorf("pw unbind failed: retval=%d", reply.Retval)
+	}
+
+	v.logger.Info("Unbound pseudowire from transport", "interface", name, "transport", binding.transport)
 	return nil
 }
 
