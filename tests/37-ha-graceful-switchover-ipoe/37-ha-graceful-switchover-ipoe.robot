@@ -10,6 +10,10 @@ sessions forward traffic on the new active without subscriber renegotiation.
 Traffic streams are NOT stopped before the switchover, and stream flow
 verification is reset afterwards so the traffic check proves fresh
 forwarding through the new active.
+Also validates the proactive GARP flood on promotion (issue 417): the
+new active must emit broadcast gratuitous ARPs from the SRG virtual MAC
+onto the access network, with nothing skipped by the SRG plugin and no
+frames misrouted to local0-output.
 
 *** Settings ***
 Library             OperatingSystem
@@ -30,6 +34,11 @@ ${bng2}             clab-${lab-name}-bng2
 ${corerouter1}      clab-${lab-name}-corerouter1
 ${subscribers}      clab-${lab-name}-subscribers
 ${session-count}    5
+${srg-vmac}         02:00:5e:00:01:01
+${garp-pcap}        /tmp/osvbng-ha-graceful-garp.pcap
+# Marker source MAC, injected via the probe veth to prove the capture is
+# armed before the switchover. The GARP assertions match only ${srg-vmac}.
+${marker-mac}       02:6f:73:76:00:99
 
 *** Test Cases ***
 # --- Phase 1: Bootstrap ---
@@ -82,6 +91,13 @@ Verify Session Sync Received On STANDBY
     Wait Until Keyword Succeeds    30 x    2s
     ...    Check Sync Sequence Nonzero    ${bng2}
 
+Snapshot local0 Drops On bng2
+    ${count} =    Get Local0 Drop Count    ${bng2}
+    Set Suite Variable    ${local0-drops-before}    ${count}
+
+Start GARP Capture On Access Bridge
+    Start Packet Capture    access-sw-gr    ${garp-pcap}
+
 # --- Phase 3: Graceful Switchover ---
 
 Trigger Graceful Switchover
@@ -103,6 +119,36 @@ Verify CGNAT Mappings Restored On bng2
     Wait Until Keyword Succeeds    30 x    2s
     ...    Check CGNAT Mapping Count    ${bng2}    ${session-count}
 
+# --- Phase 4: GARP flood on promotion (issue 417) ---
+
+Verify Restored Sessions Carry Access Interface
+    Wait Until Keyword Succeeds    12 x    5s
+    ...    Check Sessions Have Access Interface    ${bng2}
+
+Verify GARP Flood Sent On bng2
+    Wait Until Keyword Succeeds    12 x    5s
+    ...    Check SRG GARP Sent Nonzero    ${bng2}
+
+Verify No GARP Entries Skipped On bng2
+    ${skipped} =    Get SRG Counter Column    ${bng2}    9
+    Should Be Equal As Integers    ${skipped}    0
+    ...    SRG plugin refused ${skipped} GARP entries, control plane passed a non-transmittable interface
+
+Verify GARP Not Dropped Via local0 On bng2
+    ${after} =    Get Local0 Drop Count    ${bng2}
+    Should Be Equal As Integers    ${after}    ${local0-drops-before}
+    ...    local0-output drops grew during switchover, GARP frames were misrouted (issue 417 regression)
+
+Verify GARP Frames On Access Network
+    # Read the live pcap (tcpdump -U flushes per packet) and stop the
+    # capture only after the flood is found: killing tcpdump right after
+    # the counter check races the last hop, the counters flip when VPP
+    # queues the frames, milliseconds before a loaded host lets tcpdump
+    # drain them from the kernel ring.
+    Wait Until Keyword Succeeds    15 x    2s
+    ...    Check GARP In Capture
+    Stop Packet Capture    access-sw-gr
+
 Reset Stream Flow Verification
     Reset Stream Verification    ${subscribers}
 
@@ -120,14 +166,22 @@ Deploy Graceful Topology
 
 Destroy Graceful Topology
     Run Keyword And Ignore Error    Stop BNG Blaster    ${subscribers}
+    Run Keyword And Ignore Error    Stop Packet Capture    access-sw-gr
     Destroy Topology    ${lab-file}
     Destroy Access Bridge
 
 Create Access Bridge
     ${rc} =    Run And Return Rc    sudo ip link add access-sw-gr type bridge
     ${rc} =    Run And Return Rc    sudo ip link set access-sw-gr up
+    # Probe veth: garp-probe-br is a bridge port, marker frames injected
+    # on garp-probe flood the bridge like any subscriber-facing frame.
+    Run And Return Rc    sudo ip link add garp-probe type veth peer name garp-probe-br
+    Run And Return Rc    sudo ip link set garp-probe-br master access-sw-gr
+    Run And Return Rc    sudo ip link set garp-probe-br up
+    Run And Return Rc    sudo ip link set garp-probe up
 
 Destroy Access Bridge
+    Run And Return Rc    sudo ip link del garp-probe
     Run And Return Rc    sudo ip link del access-sw-gr
 
 Check HA Status
@@ -173,3 +227,78 @@ Exec osvbng API
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     RETURN    ${output}
+
+Start Packet Capture
+    [Arguments]    ${iface}    ${pcap}
+    Run Keyword And Ignore Error    Stop Packet Capture    ${iface}
+    ${rc} =    Run And Return Rc    sudo rm -f ${pcap}
+    # MAC-level filter: source MAC and dst broadcast/multicast sit before
+    # any VLAN tags, so this matches the GARP/NA flood under any encap.
+    # A BPF "vlan and arp" cannot match QinQ ARP (one vlan shift only).
+    Start Process    sudo tcpdump -i ${iface} -U -w ${pcap} '(ether broadcast or ether multicast) and (ether src ${srg-vmac} or ether src ${marker-mac})'    shell=True
+    # The graceful switchover completes in well under a second, so a
+    # fixed sleep loses the race to tcpdump's startup on a loaded host.
+    # Inject marker broadcasts through the probe veth and wait until one
+    # lands in the pcap: the capture is then provably armed.
+    Wait Until Keyword Succeeds    20 x    1s
+    ...    Capture Is Armed    ${pcap}
+
+Capture Is Armed
+    [Arguments]    ${pcap}
+    Inject Marker Frame
+    ${rc}    ${count} =    Run And Return Rc And Output
+    ...    sudo tcpdump -nn -e -r ${pcap} 2>/dev/null | grep -c "${marker-mac}"
+    Should Be True    ${count} > 0    capture not armed yet
+
+Inject Marker Frame
+    ${mac-hex} =    Replace String    ${marker-mac}    :    ${EMPTY}
+    ${rc} =    Run And Return Rc
+    ...    sudo python3 -c "import socket; s=socket.socket(socket.AF_PACKET, socket.SOCK_RAW); s.bind(('garp-probe',0)); s.send(bytes.fromhex('ffffffffffff${mac-hex}88b5')+b'osvbng-garp-capture-probe'); s.close()"
+    Should Be Equal As Integers    ${rc}    0
+
+Stop Packet Capture
+    [Arguments]    ${iface}
+    Run And Return Rc    sudo pkill -f "tcpdump -i ${iface}"
+    Sleep    1s    let tcpdump flush the pcap on exit
+
+Check GARP In Capture
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    sudo tcpdump -nn -e -r ${garp-pcap} 2>/dev/null
+    Log    ${output}
+    Should Be Equal As Integers    ${rc}    0
+    # A proactive GARP is a broadcast ARP reply sourced from the SRG
+    # virtual MAC. A normal ARP reply from the vMAC is unicast, so the
+    # broadcast destination is what proves the flood ran.
+    Should Match Regexp    ${output}    ${srg-vmac} > ff:ff:ff:ff:ff:ff.*Reply.*is-at ${srg-vmac}
+    ...    no broadcast gratuitous ARP from ${srg-vmac} seen on the access bridge
+
+Get Local0 Drop Count
+    [Arguments]    ${container}
+    ${rc}    ${count} =    Run And Return Rc And Output
+    ...    sudo docker exec ${container} vppctl -s ${VPPCTL_SOCK} show errors | awk '/local0-output/ { sum += $1 } END { printf "%d", sum }'
+    Should Be Equal As Integers    ${rc}    0
+    RETURN    ${count}
+
+Check SRG GARP Sent Nonzero
+    [Arguments]    ${container}
+    ${sent} =    Get SRG Counter Column    ${container}    5
+    Should Be True    ${sent} > 0    SRG reports no GARP sent after promotion
+
+# Columns of `show osvbng srg`: name, vmac, state, ifs, garp sent,
+# na sent, mac adds, mac dels, garp skip.
+Get SRG Counter Column
+    [Arguments]    ${container}    ${column}
+    ${rc}    ${value} =    Run And Return Rc And Output
+    ...    sudo docker exec ${container} vppctl -s ${VPPCTL_SOCK} show osvbng srg | awk '$1 == "default" { printf "%d", $${column} }'
+    Should Be Equal As Integers    ${rc}    0
+    Should Not Be Empty    ${value}    SRG "default" not found in show osvbng srg
+    RETURN    ${value}
+
+Check Sessions Have Access Interface
+    [Arguments]    ${container}
+    ${output} =    Get osvbng API Response    ${container}    /api/show/subscriber/sessions
+    ${rc}    ${bad} =    Run And Return Rc And Output
+    ...    echo '${output}' | python3 -c "import sys,json; d=json.load(sys.stdin); entries=d.get('data',[]); print(sum(1 for e in entries if not e.get('AccessIfIndex')))"
+    Should Be Equal As Integers    ${rc}    0
+    Should Be Equal As Integers    ${bad}    0
+    ...    ${bad} restored sessions have AccessIfIndex 0, GARP for them cannot target the access interface
