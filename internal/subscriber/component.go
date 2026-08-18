@@ -35,21 +35,30 @@ type Component struct {
 
 	lifecycleSub    events.Subscription
 	restoredSub     events.Subscription
+	programmedSub   events.Subscription
 	mutationResSub  events.Subscription
 	mutationWaiters sync.Map
+
+	// sw_if_index <-> session-id, maintained by persistSession and read by
+	// the QoS show views (see ifindex.go).
+	ifIndexMu        sync.RWMutex
+	sessionByIfIndex map[uint32]string
+	ifIndexBySession map[string]uint32
 }
 
 func New(deps component.Dependencies, srgMgr ha.SRGProvider) (*Component, error) {
 	log := logger.Get(logger.Subscriber)
 
 	c := &Component{
-		Base:     component.NewBase("subscriber"),
-		logger:   log,
-		eventBus: deps.EventBus,
-		srgMgr:   srgMgr,
-		vpp:      deps.Southbound,
-		cfgMgr:   deps.ConfigManager,
-		cache:    deps.Cache,
+		Base:             component.NewBase("subscriber"),
+		logger:           log,
+		eventBus:         deps.EventBus,
+		srgMgr:           srgMgr,
+		vpp:              deps.Southbound,
+		cfgMgr:           deps.ConfigManager,
+		cache:            deps.Cache,
+		sessionByIfIndex: make(map[uint32]string),
+		ifIndexBySession: make(map[string]uint32),
 	}
 
 	c.expiryMgr = session.NewExpiryManager(c.handleSessionExpiry)
@@ -65,7 +74,12 @@ func (c *Component) Start(ctx context.Context) error {
 
 	c.lifecycleSub = c.eventBus.Subscribe(events.TopicSessionLifecycle, c.handleSessionLifecycle)
 	c.restoredSub = c.eventBus.Subscribe(events.TopicSessionRestored, c.handleSessionRestored)
+	c.programmedSub = c.eventBus.Subscribe(events.TopicSessionProgrammed, c.handleSessionProgrammed)
 	c.mutationResSub = c.eventBus.Subscribe(events.TopicSubscriberMutationResult, c.handleMutationResult)
+
+	// Off the start path: the scan races nothing (lifecycle events index
+	// themselves) and only fills in sessions from before this process.
+	go c.warmSessionIfIndex(ctx)
 
 	return nil
 }
@@ -78,6 +92,9 @@ func (c *Component) Stop(ctx context.Context) error {
 	c.lifecycleSub.Unsubscribe()
 	if c.restoredSub != nil {
 		c.restoredSub.Unsubscribe()
+	}
+	if c.programmedSub != nil {
+		c.programmedSub.Unsubscribe()
 	}
 	c.mutationResSub.Unsubscribe()
 
@@ -399,6 +416,61 @@ func (c *Component) handleSessionLifecycle(event events.Event) {
 	}
 }
 
+// handleSessionProgrammed repairs the cached interface indexes once the
+// dataplane has actually programmed the session. PPPoE publishes its Active
+// lifecycle event at IPCP-bound time, before the async VPP add - at that
+// point IfIndex still holds the punt interface - and the real session
+// interface arrives only on TopicSessionProgrammed. The programmed payload
+// can be partial (IPoE's is a stripped model), so the cached session is
+// patched and re-persisted rather than replaced by the event payload.
+func (c *Component) handleSessionProgrammed(event events.Event) {
+	data, ok := event.Data.(*events.SessionLifecycleEvent)
+	if !ok || data.Session == nil {
+		return
+	}
+	payload, ok := data.Session.(models.SubscriberSession)
+	if !ok {
+		return
+	}
+	swIfIndex := payload.GetIfIndex()
+	if swIfIndex == 0 {
+		return
+	}
+	accessIfIndex := payload.GetAccessIfIndex()
+
+	cached, ok := c.SessionSnapshot(c.Ctx, data.SessionID)
+	if !ok {
+		return
+	}
+	if cached.GetIfIndex() == swIfIndex &&
+		(accessIfIndex == 0 || cached.GetAccessIfIndex() == accessIfIndex) {
+		c.indexSessionIfIndex(cached)
+		return
+	}
+
+	switch s := cached.(type) {
+	case *models.IPoESession:
+		s.IfIndex = swIfIndex
+		if accessIfIndex != 0 {
+			s.AccessIfIndex = accessIfIndex
+		}
+	case *models.PPPSession:
+		s.IfIndex = swIfIndex
+		if accessIfIndex != 0 {
+			s.AccessIfIndex = accessIfIndex
+		}
+	case *models.PPPoL2TPSession:
+		s.IfIndex = swIfIndex
+	default:
+		return
+	}
+
+	if err := c.persistSession(cached); err != nil {
+		c.logger.Warn("Failed to persist programmed session",
+			"session_id", data.SessionID, "error", err)
+	}
+}
+
 // handleSessionRestored exists for completeness so the subscriber
 // component is still subscribed to TopicSessionRestored, but for the
 // IPoE / PPPoE access types it is a no-op: the publishing component's
@@ -697,6 +769,8 @@ func (c *Component) persistSession(sess models.SubscriberSession) error {
 			}
 		}
 
+		c.unindexSessionIfIndex(sessionID)
+
 		c.logger.Debug("Deleted session from cache", "session_id", sessionID)
 		return nil
 	}
@@ -735,6 +809,8 @@ func (c *Component) persistSession(sess models.SubscriberSession) error {
 	} else {
 		c.logger.Debug("Skipping ARP lookup index creation", "session_id", sessionID, "reason", "empty key")
 	}
+
+	c.indexSessionIfIndex(sess)
 
 	return nil
 }
@@ -789,6 +865,7 @@ func (c *Component) handleSessionExpiry(sessionID string, expiryTime time.Time) 
 	if err := c.cache.Delete(c.Ctx, key); err != nil {
 		c.logger.Warn("Failed to delete expired session", "session_id", sessionID, "error", err)
 	}
+	c.unindexSessionIfIndex(sessionID)
 
 	accessType := models.AccessType(meta.AccessType)
 	protocol := models.Protocol(meta.Protocol)
