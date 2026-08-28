@@ -2,13 +2,13 @@
 # Licensed under the GNU General Public License v3.0 or later.
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-name: osvbng-l2tp-lns
+name: osvbng-cgnat-vrf
 
 # v4-only mgmt: without an explicit subnet containerlab creates a
 # dual-stack network whose static v6 default route on eth0 competes
 # with the test RA route and breaks subscriber-originated IPv6.
 mgmt:
-  ipv4-subnet: 172.20.20.0/24
+  ipv4-subnet: ${OSVBNG_LAB_MGMT_PREFIX:=172.20}.20.0/24
 
 topology:
   nodes:
@@ -23,7 +23,7 @@ topology:
         - SYS_NICE
       env:
         OSVBNG_WAIT_FOR_INTERFACES: "true"
-        OSVBNG_NUM_INTERFACES: "2"
+        OSVBNG_NUM_INTERFACES: "3"
         OSVBNG_DP_WORKER_CORES: "${OSVBNG_LAB_WORKER_CORES:=auto}"
         OSVBNG_CP_CORES: "${OSVBNG_LAB_CP_CORES:=auto}"
       binds:
@@ -42,22 +42,16 @@ topology:
       exec:
         - bash /entrypoint.sh
 
-    lac:
+    subscribers:
       kind: linux
-      image: veesixnetworks/xl2tpd:local
-      image-pull-policy: Never
-      cap-add:
-        - NET_ADMIN
-        - NET_RAW
-        - SYS_ADMIN
+      image: veesixnetworks/bngblaster:0.9.30
       binds:
-        - config/lac/xl2tpd.conf:/etc/xl2tpd/xl2tpd.conf:ro
-        - config/lac/l2tp-secrets:/etc/xl2tpd/l2tp-secrets:ro
-        - config/lac/options.xl2tpd:/etc/ppp/options.xl2tpd:ro
-        - config/lac/chap-secrets:/etc/ppp/chap-secrets:ro
+        - config/subscribers/config.json:/config/config.json:ro
 
   links:
-    - endpoints: [lac:eth1, corerouter1:eth1]
+    - endpoints: [bng1:eth1, subscribers:eth1]
       mtu: 1500
-    - endpoints: [corerouter1:eth2, bng1:eth1]
+    - endpoints: [bng1:eth2, corerouter1:eth1]
+      mtu: 1500
+    - endpoints: [corerouter1:eth2, subscribers:eth2]
       mtu: 1500
