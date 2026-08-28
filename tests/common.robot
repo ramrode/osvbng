@@ -11,8 +11,13 @@ Library             Collections
 *** Variables ***
 # preserve-env carries the CI runner's per-slot core assignment through
 # sudo so containerlab can expand it in the topologies; unset locally,
-# where the ${VAR:=auto} defaults select the auto layout.
-${CLAB_BIN}             sudo --preserve-env=OSVBNG_LAB_WORKER_CORES,OSVBNG_LAB_CP_CORES containerlab
+# where the ${VAR:=auto} defaults select the auto layout. The management
+# prefix rides the same way: topologies on the shared clab network sit
+# under ${OSVBNG_LAB_MGMT_PREFIX:=172.20}, so a box where 172.20.0.0/16
+# is taken by another Docker network runs those suites with the prefix
+# moved, not with edited topologies. Suites with a private management
+# network pin node addresses in bind-mounted configs and keep 172.20.
+${CLAB_BIN}             sudo --preserve-env=OSVBNG_LAB_WORKER_CORES,OSVBNG_LAB_CP_CORES,OSVBNG_LAB_MGMT_PREFIX containerlab
 ${runtime}              docker
 ${OSVBNG_API_PORT}      8080
 # 300 x 1s keeps the same 5-minute budget as the previous 60 x 5s but
